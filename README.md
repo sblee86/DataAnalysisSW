@@ -35,6 +35,13 @@ Open `design/ui-preview.html` directly in a browser. No server or external resou
 
 - [Windows x64 build ZIP](https://github.com/sblee86/DataAnalysisSW/raw/refs/heads/main/downloads/LANscope-win-x64.zip)
 - [Source ZIP](https://github.com/sblee86/DataAnalysisSW/raw/refs/heads/main/downloads/LANscope-source.zip)
-- [HTML preview source](design/ui-preview.html): download and open locally. GitHub does not execute HTML in its repository viewer.
+- [Live UI preview (GitHub Pages)](https://sblee86.github.io/DataAnalysisSW/)
+- [HTML preview source](design/ui-preview.html)
 
 The downloadable Windows build is a UI prototype; live capture is not implemented.
+
+## GitHub Pages
+
+The site entry point is `docs/index.html`, an exact copy of `design/ui-preview.html`. Packaging synchronizes the two.
+
+One-time repository setting: **Settings → Pages → Build and deployment → Deploy from a branch → main → /docs → Save**. GitHub then publishes the preview at https://sblee86.github.io/DataAnalysisSW/ and updates it when `docs/` changes on main. Repository Pages activation and public HTTP access have not been verified from the cloud because api.github.com and sblee86.github.io are blocked by its outbound policy.

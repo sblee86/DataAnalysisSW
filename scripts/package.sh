@@ -5,6 +5,9 @@ output_dir="${1:-/workspace/artifacts}"
 mkdir -p "$output_dir"
 output_dir="$(cd "$output_dir" && pwd)"
 cd "$repo_dir"
+mkdir -p docs
+cp design/ui-preview.html docs/index.html
+touch docs/.nojekyll
 dotnet restore src/LanScope/LanScope.csproj -r win-x64 --locked-mode
 dotnet publish src/LanScope/LanScope.csproj -c Release -r win-x64 --self-contained true --no-restore -o "$output_dir/windows-x64"
 python3 - "$repo_dir" "$output_dir" <<'PY'

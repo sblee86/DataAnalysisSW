@@ -8,3 +8,5 @@
 - Do not include .git, build caches or credentials in source ZIPs. Include source, lockfiles, documentation and preview.
 
 - User needs accessible GitHub links; internal /workspace file links did not work. When authorized to publish a delivery, upload artifacts to GitHub and verify remote files, then provide GitHub download links. Exclude downloads/ from packaged source ZIP to avoid recursive archives.
+
+- UI review must open as a website via GitHub Pages at https://sblee86.github.io/DataAnalysisSW/ . Keep docs/index.html byte-identical to design/ui-preview.html and publish docs/ on main. Do not substitute a GitHub source-view link for a rendered preview. Distinguish uploaded Pages source from verified live publication.
