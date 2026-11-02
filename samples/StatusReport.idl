@@ -1,0 +1,9 @@
+// Synthetic OMG IDL example. Not an actual IDLStudio export.
+module LANscopeDemo {
+  struct StatusReport {
+    unsigned long sequence;
+    unsigned long error_code;
+    boolean healthy;
+    string<64> description;
+  };
+};
