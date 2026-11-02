@@ -63,3 +63,8 @@
 - IcdExport.Csv/Package enforce RequireAdmin before reading/decrypting source. Export current editor or encrypted saved profile without modifying its ciphertext/plaintext state. ZIP contains normalized Excel CSV, exact original CSV/header bytes, import options and generated C++17 wire-buffer/raw accessor structs. No accounts, keys, config or PCAP.
 - Canonical CSV storage_bits/storage_bit_offset/message_size preserve struct bit storage/endian/tail padding on standalone reimport. Original header editing roundtrip uses original/source.csv plus original/headers and original options. Generated dras-wire.hpp is integration code, not restricted importer input. Never silently claim compiler-native bitfield layout equivalence.
 - Keep design/icd-export.js synced to docs/icd-export.js and delivery preview assets. Test admin/guest authorization, Excel-style edit/reimport, both endians/bit orders, header fidelity, safe ZIP paths, and generated C++ compile/read/write.
+
+## Plain C++ struct export and folding UI
+
+- User clarified C++ export means ordinary `struct Name { uint16_t member; uint8_t flag : 3; float value; };`, not only a wire-buffer/helper API. IcdExport.Struct enforces admin and exports icd-struct.hpp directly; ZIP also includes it. Native ABI is not the exact ICD wire layout. Preserve wire metadata in comments/CSV; do not claim generated declarations serialize network endian automatically.
+- Five independently collapsible WPF Expanders / web details sections: import, export, fields, HEX, endpoints/permissions. Import/endpoints open initially; samples are a subordinate fold. Export is one format selector (CSV/C++/ZIP) and one button; default C++ struct. Folding must retain inputs and role locks.

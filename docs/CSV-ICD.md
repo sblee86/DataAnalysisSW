@@ -83,9 +83,9 @@ Envelope,packet,0,struct,be,Envelope
 
 ## 관리자 ICD 내보내기 → 수정 → 다시 가져오기
 
-인터페이스 관리에서 저장한 ICD를 선택하거나 CSV/헤더를 가져온 뒤 다음 버튼을 사용합니다. **현재 편집 중인 정의와 옵션**을 내보내므로 프로파일 IP를 입력하거나 저장하기 전에도 사용할 수 있습니다. guest의 PCAP 값 변환 허용은 ICD 정의/헤더 내보내기 권한을 부여하지 않습니다.
+인터페이스 관리에서 저장한 ICD를 선택하거나 CSV/헤더를 가져온 뒤 내보내기 영역을 펼치고 원하는 형식을 선택한 뒤 저장합니다. **현재 편집 중인 정의와 옵션**을 내보내므로 프로파일 IP를 입력하거나 저장하기 전에도 사용할 수 있습니다. guest의 PCAP 값 변환 허용은 ICD 정의/헤더 내보내기 권한을 부여하지 않습니다.
 
-### ICD CSV 내보내기 (Excel)
+### CSV · Excel 수정 후 다시 가져오기
 
 1. UTF-8 BOM CSV를 저장합니다. 원본 헤더의 중첩 struct/배열도 `packet.telemetry.values[0]`처럼 전개됩니다. 선택한 Big/Little 옵션이 실제 각 행의 `endian`으로 기록됩니다.
 2. Excel에서 파일을 열어 이름·오프셋·길이·타입·단위·scale/bias 등을 수정하고 **CSV UTF-8**로 저장합니다. 긴 이름/특수 문자열을 그대로 다루려면 Excel의 데이터 → 텍스트/CSV 가져오기에서 문자열 열을 텍스트로 지정하세요.
@@ -102,7 +102,26 @@ Envelope,packet,0,struct,be,Envelope
 
 비트 필드의 위치를 바꿀 때는 저장 단위와 두 비트 오프셋을 함께 확인하세요. 필드를 늘려 전체 메시지 길이가 바뀌면 해당 메시지의 모든 행에 같은 `message_size`를 쓰거나 열을 제거해 필드의 끝으로 자동 계산하세요. 자동 계산은 C 꼬리 패딩을 추정하지 않습니다. 중복/겹침/저장 단위 범위 초과는 가져오기에서 거절합니다.
 
-### CSV / C++ 묶음 내보내기
+### C++ · 일반 struct 선언
+
+`icd-struct.hpp`에 메시지별로 아래 형태를 저장합니다. 값 접근용 메서드나 메타데이터 객체를 넣지 않고 필드를 직접 선언합니다.
+
+```cpp
+struct Telemetry {
+    uint16_t sequence;
+    uint8_t mode : 3;
+    uint8_t enabled : 1;
+    uint8_t status : 4;
+    int16_t temperature;
+    float voltage;
+};
+```
+
+고정 정수·float/double·배열·정수 비트 필드를 지원합니다. 중첩 경로/배열 요소 이름은 유효한 C++ 멤버 이름으로 정리하며 원래 이름은 주석에 남깁니다. 키워드와 중복 식별자는 충돌하지 않도록 바꿉니다. 헤더는 `#pragma pack(push, 1)`/pop을 포함하고 기존 struct 가져오기 파서로 읽을 수 있습니다.
+
+이 출력은 타입과 멤버를 편집하는 **일반 선언**입니다. 네이티브 endian/bitfield ABI와 선언 순서에 따른 오프셋은 컴파일러에 의존하며, 원본 통신 위치를 자동 직렬화하지 않습니다. 원래 byte/bit 위치, endian, scale/bias/단위는 멤버 주석에 남깁니다. 이 정보까지 보존하는 재가져오기는 CSV로 하세요. 헤더만 가져오면 기존 헤더 가져오기 규칙대로 배치를 계산하고 scale=1/bias=0을 적용합니다.
+
+### ZIP · CSV / 구조체 / 원본 헤더
 
 ZIP에 다음을 넣습니다. 파일은 명시적 관리자 내보내기에 따른 **평문**이며, 내부 암호화 저장소와 계정/키는 변경하지 않습니다.
 
@@ -110,6 +129,7 @@ ZIP에 다음을 넣습니다. 파일은 명시적 관리자 내보내기에 따
 - `original/source.csv`: 가져온 CSV 원본 바이트. 알 수 없는 추가 열도 원본 그대로 유지합니다.
 - `original/headers/`: 가져온 `.h/.hpp` 원본 바이트. 안전한 접두사/파일명으로 저장하며 원래 이름은 `import-options.json`에 기록합니다. C/C++ 구조체 자체를 수정하려면 이 헤더를 수정하고 `original/source.csv`와 함께 다시 가져오세요.
 - `import-options.json`: 원본 파일 이름, byte order, pack, struct 비트 순서, 활성 여부. 원본 CSV/헤더를 다시 가져올 때 같은 옵션을 선택하세요.
+- `icd-struct.hpp`: 위의 일반 C++ 구조체 선언. 단독 `.hpp` 저장과 같은 결과입니다.
 - `dras-wire.hpp`: CSV만 있는 ICD에도 생성하는 **C++17 wire-buffer struct와 raw 값 읽기/쓰기 메서드**. 메시지별 `dras::message_1` 등은 `wire[]`와 `read_field_1()`/`write_field_1()`을 제공하고, `field_1.name/type/unit/scale/bias`에 원래 메타데이터를 보관합니다. bytes 필드는 포인터/크기를 제공합니다. 쓰기는 다른 비트를 보존합니다.
 
 생성된 C++ 헤더는 호스트 endian/컴파일러 bitfield ABI 대신 명시적인 물리 비트 위치를 사용합니다. 정수/float 메서드는 **raw unsigned 비트 패턴**을 읽고 쓰며, signed 해석·IEEE754 변환·scale/bias 적용은 호출자가 메타데이터에 맞춰 수행합니다. 이 생성 헤더는 C++ 연동용이며 제한된 struct 가져오기 파서의 입력이 아닙니다. 다시 가져올 정의를 수정할 때는 `icd-edit.csv` 또는 `original/headers`를 사용하세요. 암호, 키, 전체 설정, PCAP은 ZIP에 포함하지 않습니다.

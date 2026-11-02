@@ -269,4 +269,14 @@ Check(IcdCsv.Parse(IcdExport.Csv(admin!,paddedProfile)).RequiredBytes("Padding")
 var boolProfile=new RecordProfile{IcdName="bool.csv",IcdContent=Encoding.UTF8.GetBytes("name,byte_offset,type,struct_name\np,0,struct,Flag"),StructSources=[new("bool.h",Encoding.UTF8.GetBytes("struct Flag { bool active; };"))]};Check(IcdCsv.Parse(IcdExport.Csv(admin!,boolProfile)).Decode("Default",new byte[]{0xFF})[0].Value=="true","C bool byte survives normalized CSV reimport");
 Throws(()=>Parse("name,byte_offset,bit_length,type,storage_bits,storage_bit_offset\nx,0,12,uint,8,0"),"CSV rejects storage bit overflow");
 Throws(()=>Parse("name,byte_offset,bit_length,type,message_size\nx,1,16,uint,2"),"CSV rejects message size shorter than fields");
+Denied(()=>IcdExport.Struct(guest!,exportProfile),"guest cannot export plain C++ declarations");
+var declarations=Encoding.UTF8.GetString(IcdExport.Struct(admin!,exportProfile));
+Check(declarations.Contains("struct Envelope {")&&declarations.Contains("uint16_t packet_telemetry_sequence;")&&declarations.Contains("uint16_t packet_telemetry_mode : 3;"),"plain C++ export contains real typed fields and bitfield declarations");
+Check(!declarations.Contains("wire[")&&!declarations.Contains("read_field")&&!declarations.Contains("namespace "),"declaration export omits wire buffer and helper functions");
+Check(CStructParser.Parse([new("icd-struct.hpp",Encoding.UTF8.GetBytes(declarations))]).ContainsKey("Envelope"),"generated declaration header can be read by restricted struct importer");
+var declarationDirectory=Environment.GetEnvironmentVariable("DRAS_CPP_CHECK_DIR");if(!string.IsNullOrEmpty(declarationDirectory))File.WriteAllText(Path.Combine(declarationDirectory,"icd-struct.hpp"),declarations);
+var sampleDeclarations=Encoding.UTF8.GetString(IcdExport.Struct(admin!,new RecordProfile{IcdContent=File.ReadAllBytes(Path.Combine(root,"samples/Telemetry.csv"))}));Check(sampleDeclarations.Contains("uint16_t sequence;")&&sampleDeclarations.Contains("uint8_t mode : 3;")&&sampleDeclarations.Contains("float voltage;"),"CSV-only ICD exports normal scalar and bitfield struct");
+if(!string.IsNullOrEmpty(declarationDirectory))File.WriteAllText(Path.Combine(declarationDirectory,"telemetry-struct.hpp"),sampleDeclarations);
+var arrayDeclarations=Encoding.UTF8.GetString(IcdExport.Struct(admin!,new RecordProfile{IcdContent=Encoding.UTF8.GetBytes("name,byte_offset,bit_length,type\nclass,0,8,uint\nicd_class,1,8,uint\nblob,2,32,bytes")}));Check(arrayDeclarations.Contains("uint8_t icd_class;")&&arrayDeclarations.Contains("uint8_t icd_class_2;")&&arrayDeclarations.Contains("uint8_t blob[4];"),"C++ identifiers handle keywords/collisions and byte arrays");
+if(!string.IsNullOrEmpty(declarationDirectory))File.WriteAllText(Path.Combine(declarationDirectory,"array-struct.hpp"),arrayDeclarations);
 Console.WriteLine($"{checks} meaningful checks passed. Windows DPAPI/WPF/live NIC tests remain Windows-only.");

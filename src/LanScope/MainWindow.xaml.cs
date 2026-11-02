@@ -182,19 +182,19 @@ public partial class MainWindow : Window
     private int SelectedPack=>new[]{1,2,4,8}[Math.Max(0,StructPackBox.SelectedIndex)];
     private string SelectedBitOrder=>StructBitBox.SelectedIndex==1?"msb0":"lsb0";
     private void IcdOptionChanged(object sender,SelectionChangedEventArgs e){if(IcdText!=null&&StructBitBox!=null&&StructPackBox!=null)UpdateIcdPreview();}
-    private void ExportIcdCsvClick(object sender,RoutedEventArgs e)=>ExportIcd(false);
-    private void ExportIcdPackageClick(object sender,RoutedEventArgs e)=>ExportIcd(true);
-    private void ExportIcd(bool package)
+    private void ExportIcdClick(object sender,RoutedEventArgs e)=>ExportIcd(ExportFormatBox.SelectedIndex);
+    private void ExportIcd(int format)
     {
         if(!AdminAction())return;
         try {
             // Export the current editor, including selected but not yet saved definitions/options.
             var p=new RecordProfile{IcdName=selectedIcdName,IcdContent=selectedIcd,StructSources=selectedStructs,ByteOrder=SelectedByteOrder,StructPack=SelectedPack,StructBitOrder=SelectedBitOrder,Enabled=IcdEnabledBox.IsChecked==true};
-            var bytes=package?IcdExport.Package(session!,p):IcdExport.Csv(session!,p);
+            bool package=format==2,structure=format==1;string extension=package?".zip":structure?".hpp":".csv";
+            var bytes=package?IcdExport.Package(session!,p):structure?IcdExport.Struct(session!,p):IcdExport.Csv(session!,p);
             try {
-                var d=new SaveFileDialog{Title=package?"ICD CSV / C++ 묶음 내보내기":"Excel 편집용 ICD CSV 내보내기",Filter=package?"ICD package (*.zip)|*.zip":"CSV UTF-8 (*.csv)|*.csv",DefaultExt=package?".zip":".csv",FileName=package?"icd-export.zip":"icd-edit.csv",AddExtension=true,OverwritePrompt=true};
+                var d=new SaveFileDialog{Title="ICD 내보내기",Filter=package?"ICD package (*.zip)|*.zip":structure?"C++ struct (*.hpp)|*.hpp":"CSV UTF-8 (*.csv)|*.csv",DefaultExt=extension,FileName=package?"icd-export.zip":structure?"icd-struct.hpp":"icd-edit.csv",AddExtension=true,OverwritePrompt=true};
                 if(d.ShowDialog(this)!=true)return;
-                if(!Path.GetExtension(d.FileName).Equals(package?".zip":".csv",StringComparison.OrdinalIgnoreCase))throw new ArgumentException("내보내기 확장자를 확인하세요.");
+                if(!Path.GetExtension(d.FileName).Equals(extension,StringComparison.OrdinalIgnoreCase))throw new ArgumentException("내보내기 확장자를 확인하세요.");
                 var temp=d.FileName+"."+Guid.NewGuid().ToString("N")+".tmp";
                 try{File.WriteAllBytes(temp,bytes);File.Move(temp,d.FileName,true);}finally{if(File.Exists(temp))File.Delete(temp);}
                 StatusText.Text="ICD 내보내기 완료 · 평문 파일: "+d.FileName;
