@@ -1,0 +1,104 @@
+using System.IO;
+using System.Net;
+using System.Security.Cryptography;
+using System.Text;
+using PacketDotNet;
+
+namespace LanScope;
+public enum UserRole { Guest, Admin }
+public sealed record LoginSession(string UserId, UserRole Role)
+{
+    public void RequireAdmin() { if(Role != UserRole.Admin) throw new UnauthorizedAccessException("관리자 계정만 사용할 수 있습니다."); }
+}
+public sealed class AccountService
+{
+    private readonly byte[] data;
+    public AccountService(byte[] binary) => data = binary;
+    public LoginSession? Login(string id, string password)
+    {
+        using var reader = new BinaryReader(new MemoryStream(data), Encoding.UTF8);
+        if(reader.ReadString() != "LANSCOPE-AUTH-1") throw new InvalidDataException("계정 리소스 형식 오류");
+        var count = reader.ReadInt32(); LoginSession? result = null;
+        for(var i=0;i<count;i++) {
+            var name=reader.ReadString(); var role=(UserRole)reader.ReadByte(); var iterations=reader.ReadInt32();
+            var salt=reader.ReadBytes(16); var hash=reader.ReadBytes(32);
+            var actual=Rfc2898DeriveBytes.Pbkdf2(password,salt,iterations,HashAlgorithmName.SHA256,32);
+            if(CryptographicOperations.FixedTimeEquals(actual,hash) && string.Equals(name,id.Trim(),StringComparison.Ordinal)) result=new(name,role);
+            CryptographicOperations.ZeroMemory(actual);
+        }
+        return result;
+    }
+}
+public sealed class RecordProfile
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "";
+    public string IcdName { get; set; } = "";
+    public byte[] IcdContent { get; set; } = [];
+    public string IcdHash => Convert.ToHexString(SHA256.HashData(IcdContent));
+    public List<string> SenderIps { get; set; } = [];
+    public List<string> ReceiverIps { get; set; } = [];
+    public bool BothDirections { get; set; } = true;
+    public void Validate()
+    {
+        if(!Guid.TryParseExact(Id,"N",out _)) throw new ArgumentException("프로파일 ID 형식 오류");
+        if(string.IsNullOrWhiteSpace(Name) || Name.Length>80) throw new ArgumentException("프로파일 이름을 1~80자로 입력하세요.");
+        if(string.IsNullOrWhiteSpace(IcdName) || IcdContent.Length==0 || IcdContent.Length>16*1024*1024) throw new ArgumentException("ICD 파일을 선택하세요. 최대 16 MB입니다.");
+        if(SenderIps.Count==0 || ReceiverIps.Count==0) throw new ArgumentException("송신 IP와 수신 IP를 각각 1개 이상 입력하세요.");
+        if(SenderIps.Concat(ReceiverIps).Any(x=>!IPAddress.TryParse(x,out _))) throw new ArgumentException("유효한 IPv4 또는 IPv6 주소를 입력하세요. CIDR/호스트명은 지원하지 않습니다.");
+    }
+    public bool Matches(IPAddress source, IPAddress destination)
+    {
+        bool Has(List<string> list, IPAddress address)=>list.Any(x=>IPAddress.TryParse(x,out var ip)&&ip.Equals(address));
+        return (Has(SenderIps,source)&&Has(ReceiverIps,destination)) || (BothDirections&&Has(SenderIps,destination)&&Has(ReceiverIps,source));
+    }
+    public override string ToString()=>Name;
+}
+public sealed class NicBinding
+{
+    public string DeviceId { get; set; } = "";
+    public string DeviceName { get; set; } = "";
+    public List<string> ProfileIds { get; set; } = [];
+}
+public sealed class WorkspaceSettings
+{
+    public string OutputDirectory { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),"LANscope","Records");
+    public List<RecordProfile> Profiles { get; set; } = [];
+    public List<NicBinding> Bindings { get; set; } = [];
+    public void ValidateForRecording(IReadOnlyCollection<string> available)
+    {
+        if(string.IsNullOrWhiteSpace(OutputDirectory)||!Path.IsPathFullyQualified(OutputDirectory)) throw new ArgumentException("기록 폴더를 절대 경로로 지정하세요.");
+        if(Bindings.Count==0) throw new ArgumentException("NIC에 프로파일을 1개 이상 매칭하세요.");
+        if(Bindings.Select(x=>x.DeviceId).Distinct().Count()!=Bindings.Count) throw new ArgumentException("NIC 매칭이 중복되었습니다.");
+        foreach(var b in Bindings) {
+            if(!available.Contains(b.DeviceId)) throw new ArgumentException($"NIC을 사용할 수 없습니다: {b.DeviceName}");
+            if(b.ProfileIds.Count==0 || b.ProfileIds.Distinct().Count()!=b.ProfileIds.Count) throw new ArgumentException("각 NIC에는 중복 없이 프로파일을 1개 이상 선택해야 합니다.");
+            foreach(var id in b.ProfileIds) (Profiles.SingleOrDefault(p=>p.Id==id)??throw new ArgumentException("삭제된 프로파일 매칭입니다.")).Validate();
+        }
+    }
+}
+public sealed record MappingSnapshot(string Nic, string Profile, long Packets, long Bytes, int MinSize, int MaxSize, double AverageSize, string LastPacket, string State);
+public sealed class PacketCounter
+{
+    public long Packets {get;private set;} public long Bytes {get;private set;}
+    public int MinSize {get;private set;} public int MaxSize {get;private set;}
+    public DateTime? LastPacket {get;private set;}
+    public void Add(int length, DateTime utc) { Packets++; Bytes+=length; MinSize=Packets==1?length:Math.Min(MinSize,length); MaxSize=Math.Max(MaxSize,length); LastPacket=utc; }
+    public double Average=>Packets==0?0:(double)Bytes/Packets;
+}
+public sealed class PcapFile : IDisposable
+{
+    private readonly BinaryWriter writer;
+    public PcapFile(string path, LinkLayers linkType)
+    {
+        writer=new BinaryWriter(new FileStream(path,FileMode.CreateNew,FileAccess.Write,FileShare.Read,65536));
+        writer.Write(0xa1b2c3d4u); writer.Write((ushort)2); writer.Write((ushort)4);writer.Write(0);writer.Write(0u);writer.Write(65535u);writer.Write((uint)linkType);
+    }
+    public void Write(byte[] bytes,ulong seconds,ulong microseconds)
+    {
+        if(bytes.Length>65535 || seconds>uint.MaxValue || microseconds>=1000000) throw new InvalidDataException("지원하지 않는 프레임 크기/타임스탬프입니다.");
+        writer.Write((uint)seconds);writer.Write((uint)microseconds);writer.Write((uint)bytes.Length);writer.Write((uint)bytes.Length);writer.Write(bytes);
+    }
+    public void Flush()=>writer.Flush();
+    public void Dispose()=>writer.Dispose();
+}

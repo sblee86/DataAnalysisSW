@@ -1,0 +1,10 @@
+// Synthetic OMG IDL example. Not an actual IDLStudio export.
+module LANscopeDemo {
+  enum Operation { STANDBY, RUN, STOP };
+  struct ControlCommand {
+    unsigned long sequence;
+    Operation operation;
+    unsigned short channel;
+    boolean enabled;
+  };
+};

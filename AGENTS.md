@@ -12,3 +12,13 @@
 - UI review must open as a website via GitHub Pages at https://sblee86.github.io/DataAnalysisSW/ . Keep docs/index.html byte-identical to design/ui-preview.html and publish docs/ on main. Do not substitute a GitHub source-view link for a rendered preview. Distinguish uploaded Pages source from verified live publication.
 - Include all required NuGet .nupkg files in nuget-offline/ (including Windows host, reference and self-contained runtime packs) with a SHA-256 manifest. Preserve original package signatures. Verify restore with an empty package cache and only the local feed. Windows users build via scripts/build-offline.ps1 after installing the pinned SDK.
 - Full repository ZIP from GitHub includes the offline NuGet feed. downloads/LANscope-source.zip is code-only to stay within GitHub's per-file limit; label it accordingly.
+
+## v0.2 application contract
+
+- admin: profile/ICD/IP settings, NIC matching, output directory, recording start/stop and monitoring. guest: recording start/stop and monitoring; no configuration mutation. Enforce permissions in settings services as well as visibility.
+- Store salted PBKDF2 hashes in embedded Resources/accounts.bin; never add plaintext account passwords to source/configuration. Account regeneration prompts securely via scripts/set-accounts.py. Include resources in the single Windows EXE.
+- Mutable workspace settings are a Hidden binary file in Windows LocalAppData, encrypted with DPAPI CurrentUser. Never silently reset corrupt settings. Both app roles share that Windows user's configuration.
+- Match individual IPv4/IPv6 sender/receiver addresses; optional reverse flow. At least one profile is required per enabled NIC. Each test creates a unique directory and one PCAP per NIC/profile. Session metadata includes the original ICD in binary form.
+- Sample ICDs are hand-written OMG IDL examples, not verified IDLStudio exports. Current capture matching is IP-based; do not claim IDL payload decoding.
+- Keep the HTML preview aligned with login, roles, profile/settings screens and monitoring. Browser NICs/recording are clearly labeled simulations. Live Windows capture and DPAPI require Windows verification.
+- Run tests/LanScope.Checks with password test bindings for the delivered temporary accounts; never log them. Windows-specific tests must be reported skipped when run on Linux.

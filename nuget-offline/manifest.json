@@ -5,6 +5,11 @@
     "sha256": "91638ac8382c437e71c0739a0e3123290f9bf48bcd01e616352a86add5571089"
   },
   {
+    "file": "microsoft.net.illink.tasks.10.0.14.nupkg",
+    "bytes": 1535193,
+    "sha256": "e2a71b32b5c135dc2b0c87ea8fba6c9e677332e00bf959fbcdced239b825b75c"
+  },
+  {
     "file": "microsoft.netcore.app.host.win-x64.10.0.14.nupkg",
     "bytes": 5791948,
     "sha256": "2a4547b0e6cf0dd15e723531daa5450d99d4e151105aec0d31f2b0c7cfb286db"

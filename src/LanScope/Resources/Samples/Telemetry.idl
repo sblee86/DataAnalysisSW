@@ -1,0 +1,9 @@
+// Synthetic OMG IDL example. Not an actual IDLStudio export.
+module LANscopeDemo {
+  struct Telemetry {
+    unsigned long sequence;
+    double timestamp;
+    float temperature;
+    float voltage;
+  };
+};
