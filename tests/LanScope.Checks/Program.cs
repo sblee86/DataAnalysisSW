@@ -18,6 +18,18 @@ var guest=auth.Login("guest",Environment.GetEnvironmentVariable("LANSCOPE_TEST_G
 Check(admin?.Role==UserRole.Admin,"admin hash authentication");Check(guest?.Role==UserRole.Guest,"guest hash authentication");
 try{guest!.RequireAdmin();throw new Exception("Guest elevated");}catch(UnauthorizedAccessException){Check(true,"guest configuration authorization denied");}
 admin!.RequireAdmin();Check(true,"admin configuration authorization allowed");
+if(args.Contains("--prepare-resources")) {
+ var names=new[]{"Telemetry.csv","ControlCommand.csv","StatusReport.csv"};
+ var directory=Path.Combine(root,"src/LanScope/Resources");
+ File.WriteAllBytes(Path.Combine(directory,"policy-public.bin"),IcdProtection.PublicKey(admin!));
+ using var writer=new BinaryWriter(File.Create(Path.Combine(directory,"samples.bin")),Encoding.UTF8);
+ writer.Write(3);
+ for(int i=0;i<names.Length;i++) {
+  var profile=new RecordProfile{Id=(i+1).ToString().PadLeft(32,'0'),Name="인터페이스 "+(char)('A'+i),IcdName=names[i],IcdContent=File.ReadAllBytes(Path.Combine(root,"samples",names[i])),SenderIps=["192.0.2.10"],ReceiverIps=["198.51.100.20"]};
+  IcdProtection.Seal(admin!,profile);writer.Write(profile.Id);writer.Write(profile.Name);writer.Write(profile.IcdId);writer.Write(profile.EncryptedIcd.Length);writer.Write(profile.EncryptedIcd);profile.ClearPlaintext();
+ }
+ Console.WriteLine("Prepared encrypted sample resources and public policy verification key");return;
+}
 var p=new RecordProfile {Name="Telemetry",IcdName="Telemetry.csv",IcdContent=File.ReadAllBytes(Path.Combine(root,"samples/Telemetry.csv")),SenderIps=["192.0.2.1"],ReceiverIps=["198.51.100.2"]};p.Validate();
 Check(p.Matches(IPAddress.Parse("192.0.2.1"),IPAddress.Parse("198.51.100.2")),"forward matching");
 Check(p.Matches(IPAddress.Parse("198.51.100.2"),IPAddress.Parse("192.0.2.1")),"reverse matching");
@@ -40,6 +52,8 @@ try {
  var packet=Packet.ParsePacket(raw.LinkLayerType,raw.Data);var ip=packet.Extract<IPPacket>();var udp=packet.Extract<UdpPacket>();
  Check(p.Matches(ip.SourceAddress,ip.DestinationAddress)&&udp.SourcePort==12345&&udp.DestinationPort==53&&Encoding.ASCII.GetString(udp.PayloadData)=="TEST","recorded packet matches profile and UDP payload");
  Check(reader.GetNextPacket(out _)==GetPacketStatus.NoRemainingPackets,"PCAP EOF");
+ using var filtered=new CaptureFileReaderDevice(output);filtered.Open();filtered.Filter=CaptureEngine.BuildFilter([p]);Check(filtered.GetNextPacket(out _)==GetPacketStatus.PacketRead,"driver BPF compiles and admits permitted endpoints");
+ var other=new RecordProfile{SenderIps=["203.0.113.1"],ReceiverIps=["203.0.113.2"]};using var excluded=new CaptureFileReaderDevice(output);excluded.Open();excluded.Filter=CaptureEngine.BuildFilter([other]);Check(excluded.GetNextPacket(out _)==GetPacketStatus.NoRemainingPackets,"driver BPF excludes unrelated endpoints");
 }finally{File.Delete(output);}
 // Session state is clean before any live device is opened.
 var engine=new CaptureEngine();Check(engine.Snapshot().Count==0,"new session has no stale counters");engine.ClearHistory();engine.Dispose();
@@ -48,13 +62,55 @@ try {new SettingsStore().Save(guest!,settings);throw new Exception("Guest persis
 if(OperatingSystem.IsWindows()) {
  var path=Path.Combine(Path.GetTempPath(),"lanscope-settings-"+Guid.NewGuid().ToString("N")+".bin");
  try {
-  var store=new SettingsStore(path);store.Save(admin!,settings);var loaded=store.Load();
+  var store=new SettingsStore(path,IcdProtection.PublicKey(admin!));store.Save(admin!,settings);var loaded=store.Load(admin!);
   Check(loaded.Profiles.Single().IcdContent.SequenceEqual(p.IcdContent)&&loaded.Bindings.Single().ProfileIds.Single()==p.Id,"Windows DPAPI configuration round-trip");
   Check(File.GetAttributes(path).HasFlag(FileAttributes.Hidden),"Windows settings hidden attribute");
   Check(!Encoding.UTF8.GetString(File.ReadAllBytes(path)).Contains(p.Name),"Windows settings plaintext concealed");
-  store.Save(admin!,settings);Check(store.Load().Profiles.Count==1,"atomic settings replacement");
+  store.Save(admin!,settings);Check(store.Load(admin!).Profiles.Count==1,"atomic settings replacement");
  }finally{if(File.Exists(path))File.Delete(path);}
 }else Console.WriteLine("SKIP: four Windows DPAPI/hidden-file checks (Linux host)");
+void Denied(Action action,string label){try{action();}catch(UnauthorizedAccessException){Check(true,label);return;}throw new Exception("FAIL: "+label);}
+void CryptoRejected(Action action,string label){try{action();}catch(System.Security.Cryptography.CryptographicException){Check(true,label);return;}throw new Exception("FAIL: "+label);}
+IcdProtection.Seal(admin!,p);var originalCsv=p.IcdContent.ToArray();var originalName=p.IcdName;
+Check(p.EncryptedIcd.AsSpan().IndexOf(originalCsv)<0&&!Encoding.UTF8.GetString(p.EncryptedIcd).Contains(originalName),"AES envelope contains no CSV source or filename");
+var serialized=System.Text.Json.JsonSerializer.Serialize(p);
+Check(!serialized.Contains("IcdContent")&&!serialized.Contains("IcdName")&&!serialized.Contains(originalName),"configuration serialization omits all plaintext ICD properties");
+p.ClearPlaintext();IcdProtection.Open(admin!,p);Check(p.IcdContent.SequenceEqual(originalCsv)&&p.IcdName==originalName,"admin decrypts authenticated ICD envelope");
+Denied(()=>IcdProtection.Open(guest!,p),"guest cannot decrypt ICD through vault service");
+Denied(()=>IcdProtection.Seal(guest!,p),"guest cannot replace encrypted ICD");
+var bad=p.EncryptedIcd.ToArray();bad[^1]^=1;CryptoRejected(()=>IcdProtection.Decrypt(admin!,"profile:"+p.Id,bad),"tampered encrypted ICD rejected");
+CryptoRejected(()=>IcdProtection.Decrypt(admin!,"profile:"+Guid.NewGuid().ToString("N"),p.EncryptedIcd),"ciphertext copied to another profile rejected by authenticated binding");
+using(var wrongKey=new LoginSession("test-admin",UserRole.Admin,System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)))CryptoRejected(()=>IcdProtection.Decrypt(wrongKey,"profile:"+p.Id,p.EncryptedIcd),"wrong admin key rejected");
+var publicKey=IcdProtection.PublicKey(admin!);var policy=Encoding.UTF8.GetBytes("allowed ICD policy");var signature=IcdProtection.Sign(admin!,policy);IcdProtection.Verify(publicKey,policy,signature);Check(true,"guest policy independently verifies with public key");
+policy[0]^=1;CryptoRejected(()=>IcdProtection.Verify(publicKey,policy,signature),"policy allowlist tampering rejected");
+Denied(()=>IcdProtection.Sign(guest!,policy),"guest cannot sign a forged permission policy");
+Check(settings.ForSession(guest!).Profiles.Count==0&&settings.ForSession(guest!).Bindings.Count==0,"legacy and new ICD permissions default deny");
+settings.GuestIcdAllowList.Add(p.IcdId);var guestView=settings.ForSession(guest!);
+Check(guestView.Profiles.Count==1&&guestView.Bindings.Single().ProfileIds.Single()==p.Id,"guest receives only allowed profile and NIC mappings");
+Check(guestView.Profiles[0].IcdContent.Length==0&&guestView.Profiles[0].IcdName=="","guest view never carries decrypted ICD or filename");
+var hidden=new RecordProfile{Name="Hidden ICD",IcdName="Hidden.csv",IcdContent=Encoding.UTF8.GetBytes("name,byte_offset,bit_length,type\nsecret,0,8,uint"),SenderIps=["203.0.113.1"],ReceiverIps=["203.0.113.2"]};IcdProtection.Seal(admin!,hidden);settings.Profiles.Add(hidden);settings.Bindings[0].ProfileIds.Add(hidden.Id);
+Check(settings.ForSession(guest!).Profiles.All(x=>x.Id!=hidden.Id)&&!settings.ForSession(guest!).GuestRecordingConflict,"unpermitted ICD mappings removed while disjoint recording allowed");
+hidden.SenderIps=[..p.SenderIps];hidden.ReceiverIps=[..p.ReceiverIps];
+Check(settings.ForSession(guest!).GuestRecordingConflict,"same-endpoint mixed ICDs block guest recording");
+try{new CaptureEngine().Start(guest!,settings,[],"Denied");throw new Exception("Guest capture bypassed policy");}catch(UnauthorizedAccessException){Check(true,"capture engine independently blocks mixed-endpoint guest recording before opening NIC");}
+settings.GuestIcdAllowList.Remove(p.IcdId);Check(settings.ForSession(guest!).Profiles.Count==0,"revoked ICD disappears from guest view");
+var held=p.IcdContent;p.ClearPlaintext();Check(held.All(b=>b==0),"plaintext buffer is zeroed when clearing workspace");IcdProtection.Open(admin!,p);
+using(var expired=auth.Login("admin",Environment.GetEnvironmentVariable("LANSCOPE_TEST_ADMIN")!)!){expired.Dispose();Denied(()=>IcdProtection.Sign(expired,policy),"logout/disposed session cannot use admin key");}
+var manifestDirectory=Path.Combine(Path.GetTempPath(),"lanscope-manifest-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(manifestDirectory);
+try {
+ settings.GuestIcdAllowList.Add(p.IcdId);var permitted=settings.ForSession(guest!);CaptureEngine.WriteManifest(manifestDirectory,guest!,permitted,"Test");
+ var manifest=File.ReadAllBytes(Path.Combine(manifestDirectory,"session.bin"));
+ Check(manifest.AsSpan().IndexOf(originalCsv)<0&&!Encoding.UTF8.GetString(manifest).Contains(originalName)&&!Encoding.UTF8.GetString(manifest).Contains(hidden.Name),"session metadata excludes ICD source, CSV filename and denied ICD metadata");
+}finally{Directory.Delete(manifestDirectory,true);}
+var legacyDirectory=Path.Combine(Path.GetTempPath(),"lanscope-legacy-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(legacyDirectory);
+try {
+ var path=Path.Combine(legacyDirectory,"session.bin");using(var writer=new BinaryWriter(File.Create(path))){writer.Write("LANSCOPE-SESSION-1");writer.Write(originalCsv);}
+ var legacyBytes=File.ReadAllBytes(path);Denied(()=>LegacySessionProtection.ProtectFolder(guest!,legacyDirectory),"guest cannot migrate or decrypt legacy ICD metadata");
+ var result=LegacySessionProtection.ProtectFolder(admin!,legacyDirectory);var protectedBytes=File.ReadAllBytes(path);
+ Check(result.Updated==1&&result.Errors.Count==0&&protectedBytes.AsSpan().IndexOf(originalCsv)<0,"legacy session plaintext ICD is encrypted in place");
+ Check(IcdProtection.Decrypt(admin!,"legacy-session-metadata",protectedBytes).SequenceEqual(legacyBytes),"legacy metadata remains exactly recoverable by admin");
+ Check(LegacySessionProtection.ProtectFolder(admin!,legacyDirectory).Updated==0,"legacy metadata encryption is repeatable without double wrapping");
+}finally{Directory.Delete(legacyDirectory,true);}
 IcdSchema Parse(string csv)=>IcdCsv.Parse(Encoding.UTF8.GetBytes(csv));
 string Header="message,name,byte_offset,bit_offset,bit_length,type,endian,bit_order,scale,bias,unit,description\n";
 var telemetry=IcdCsv.Parse(File.ReadAllBytes(Path.Combine(root,"samples/Telemetry.csv")));

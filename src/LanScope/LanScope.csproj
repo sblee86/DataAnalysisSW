@@ -12,7 +12,8 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="Resources/accounts.bin" />
-    <EmbeddedResource Include="Resources/Samples/*.csv" />
+    <EmbeddedResource Include="Resources/samples.bin" />
+    <EmbeddedResource Include="Resources/policy-public.bin" />
     <PackageReference Include="SharpPcap" Version="6.3.1" />
     <PackageReference Include="PacketDotNet" Version="1.4.8" />
   </ItemGroup>

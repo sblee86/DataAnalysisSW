@@ -22,7 +22,7 @@ public partial class MainWindow : Window
     private bool busy; private int failedLogins;private DateTime blockedUntil;
     private DateTime startedAt;private TimeSpan elapsed;
     private string? editingProfileId;private byte[] selectedIcd=[];private string selectedIcdName="";
-    private readonly string[] sampleNames=["Telemetry.csv","ControlCommand.csv","StatusReport.csv"];
+    private readonly string[] sampleNames=["샘플 A","샘플 B","샘플 C"];
     public MainWindow()
     {
         InitializeComponent();SampleBox.ItemsSource=sampleNames;SampleBox.SelectedIndex=0;
@@ -39,21 +39,24 @@ public partial class MainWindow : Window
         if(busy)return;
         if(DateTime.UtcNow<blockedUntil){LoginError.Text="잠시 후 다시 시도하세요. (30초 대기)";return;}
         busy=true;LoginButton.IsEnabled=false;LoginError.Text="";
-        var id=UserIdBox.Text;var password=PasswordInput.Password;PasswordInput.Clear();
+        LoginSession? candidate=null;var id=UserIdBox.Text;var password=PasswordInput.Password;PasswordInput.Clear();
         try {
             var result=await Task.Run(()=>new AccountService(Resource("accounts.bin")).Login(id,password));
-            password="";
+            candidate=result;password="";
             if(result==null){failedLogins++;if(failedLogins>=5){blockedUntil=DateTime.UtcNow.AddSeconds(30);failedLogins=0;}LoginError.Text="ID 또는 암호가 올바르지 않습니다.";return;}
-            settings=store.Load();engine.ClearHistory();session=result;failedLogins=0;
-            if(!File.Exists(store.FilePath)) {
-                settings.Profiles=sampleNames.Select((name,i)=>new RecordProfile {Name=Path.GetFileNameWithoutExtension(name),IcdName=name,IcdContent=Resource(name),SenderIps=["192.0.2."+(10+i)],ReceiverIps=["198.51.100."+(20+i)]}).ToList();
+            settings.ClearPlaintext();settings=store.Load(result);engine.ClearHistory();session=result;candidate=null;failedLogins=0;
+            if(!File.Exists(store.FilePath)&&session.Role==UserRole.Admin) {
+                using var reader=new BinaryReader(new MemoryStream(Resource("samples.bin")));
+                int count=reader.ReadInt32();for(int i=0;i<count;i++) {
+                    var p=new RecordProfile{Id=reader.ReadString(),Name=reader.ReadString(),IcdId=reader.ReadString()};p.EncryptedIcd=reader.ReadBytes(reader.ReadInt32());p.SenderIps=["192.0.2."+(10+i)];p.ReceiverIps=["198.51.100."+(20+i)];IcdProtection.Open(session,p);settings.Profiles.Add(p);
+                }
             }
             LoginView.Visibility=Visibility.Collapsed;WorkspaceView.Visibility=Visibility.Visible;
             bool admin=session.Role==UserRole.Admin;ProfileNav.Visibility=SettingsNav.Visibility=admin?Visibility.Visible:Visibility.Collapsed;
             AccountText.Text=$"{session.UserId} / {session.Role.ToString().ToUpperInvariant()}";
-            PermissionNote.Text=admin?"전체 설정과 기록을 관리할 수 있습니다.":"설정은 관리자에게 요청하세요.\n기록 시작·중지와 현황 조회가 가능합니다.";
+            PermissionNote.Text=admin?"전체 설정과 기록을 관리할 수 있습니다.":"관리자가 허용한 ICD의\n기록·조회만 가능합니다.\nICD 원본과 구조는 비공개입니다.";
             ReloadEditors();ScanNics();ShowPage("dashboard");timer.Start();UpdateDashboard();
-        } catch(Exception error) {session=null;timer.Stop();WorkspaceView.Visibility=Visibility.Collapsed;LoginView.Visibility=Visibility.Visible;LoginError.Text="로그인/설정 로드 실패: "+error.Message;}
+        } catch(Exception error) {candidate?.Dispose();session?.Dispose();session=null;timer.Stop();WorkspaceView.Visibility=Visibility.Collapsed;LoginView.Visibility=Visibility.Visible;LoginError.Text="로그인/설정 로드 실패: "+error.Message;}
         finally {busy=false;LoginButton.IsEnabled=true;UpdateControls();}
     }
     private void PasswordKeyDown(object sender,KeyEventArgs e){if(e.Key==Key.Enter)LoginClick(sender,new());}
@@ -66,10 +69,10 @@ public partial class MainWindow : Window
     private void SaveChange(Action<WorkspaceSettings> change)
     {
         if(!AdminAction())return;
-        try {var next=JsonSerializer.Deserialize<WorkspaceSettings>(JsonSerializer.Serialize(settings))!;change(next);store.Save(session!,next);engine.ClearHistory();settings=next;ReloadEditors();UpdateDashboard();StatusText.Text="설정 저장 완료 · Windows 사용자별 암호화된 숨김 바이너리";}
+        try {var next=IcdProtection.CloneForAdmin(session!,settings);change(next);store.Save(session!,next);engine.ClearHistory();settings.ClearPlaintext();settings=next;ReloadEditors();UpdateDashboard();StatusText.Text="설정 저장 완료 · Windows 사용자별 암호화된 숨김 바이너리";}
         catch(Exception error){ShowError(error);}
     }
-    private void ReloadEditors(){ProfilesList.ItemsSource=settings.Profiles;BindingProfiles.ItemsSource=settings.Profiles;FolderBox.Text=settings.OutputDirectory;OutputText.Text="기록 폴더: "+settings.OutputDirectory;NewEditor();}
+    private void ReloadEditors(){ProfilesList.ItemsSource=session?.Role==UserRole.Admin?settings.Profiles:null;BindingProfiles.ItemsSource=session?.Role==UserRole.Admin?settings.Profiles:null;FolderBox.Text=settings.OutputDirectory;OutputText.Text="기록 폴더: "+settings.OutputDirectory;NewEditor();}
     private void ShowPage(string name)
     {
         if(name!="dashboard"&&(session?.Role!=UserRole.Admin||engine.IsRunning||busy))return;
@@ -81,12 +84,12 @@ public partial class MainWindow : Window
     private void DashboardClick(object sender,RoutedEventArgs e)=>ShowPage("dashboard");
     private void ProfilesClick(object sender,RoutedEventArgs e){if(AdminAction())ShowPage("profiles");}
     private void SettingsClick(object sender,RoutedEventArgs e){if(AdminAction())ShowPage("settings");}
-    private void NewEditor(){editingProfileId=null;ProfileNameBox.Text="";SenderBox.Text="";ReceiverBox.Text="";selectedIcd=[];selectedIcdName="";IcdText.Text="선택된 CSV 없음";currentSchema=null;IcdFields.ItemsSource=null;DecodeGrid.ItemsSource=null;MessageBoxSelect.ItemsSource=null;BothDirectionsBox.IsChecked=true;}
+    private void NewEditor(){editingProfileId=null;ProfileNameBox.Text="";SenderBox.Text="";ReceiverBox.Text="";selectedIcd=[];selectedIcdName="";IcdText.Text="선택된 CSV 없음";currentSchema=null;IcdFields.ItemsSource=null;DecodeGrid.ItemsSource=null;MessageBoxSelect.ItemsSource=null;BothDirectionsBox.IsChecked=true;GuestIcdAllowedBox.IsChecked=false;}
     private void NewProfileClick(object sender,RoutedEventArgs e){if(AdminAction()){ProfilesList.SelectedItem=null;NewEditor();}}
     private void ProfileSelected(object sender,SelectionChangedEventArgs e)
     {
         if(ProfilesList.SelectedItem is not RecordProfile p)return;
-        editingProfileId=p.Id;ProfileNameBox.Text=p.Name;SenderBox.Text=string.Join(", ",p.SenderIps);ReceiverBox.Text=string.Join(", ",p.ReceiverIps);selectedIcd=p.IcdContent;selectedIcdName=p.IcdName;BothDirectionsBox.IsChecked=p.BothDirections;UpdateIcdPreview();
+        editingProfileId=p.Id;ProfileNameBox.Text=p.Name;SenderBox.Text=string.Join(", ",p.SenderIps);ReceiverBox.Text=string.Join(", ",p.ReceiverIps);selectedIcd=p.IcdContent;selectedIcdName=p.IcdName;BothDirectionsBox.IsChecked=p.BothDirections;GuestIcdAllowedBox.IsChecked=settings.GuestIcdAllowList.Contains(p.IcdId);UpdateIcdPreview();
     }
     private IcdSchema? currentSchema;
     private void UpdateIcdPreview()
@@ -116,14 +119,14 @@ public partial class MainWindow : Window
         if(d.ShowDialog()!=true)return;
         try{var info=new FileInfo(d.FileName);if(info.Length==0||info.Length>16*1024*1024)throw new ArgumentException("ICD는 1 byte ~ 16 MB이어야 합니다.");var bytes=File.ReadAllBytes(d.FileName);IcdCsv.Parse(bytes);selectedIcd=bytes;selectedIcdName=info.Name;UpdateIcdPreview();}catch(Exception error){ShowError(error);}
     }
-    private void UseSampleClick(object sender,RoutedEventArgs e){if(!AdminAction())return;selectedIcdName=(string)SampleBox.SelectedItem;selectedIcd=Resource(selectedIcdName);UpdateIcdPreview();}
+    private void UseSampleClick(object sender,RoutedEventArgs e){if(!AdminAction())return;var sample=settings.Profiles.FirstOrDefault(p=>p.Name=="인터페이스 "+(char)('A'+SampleBox.SelectedIndex));if(sample==null){ShowError(new ArgumentException("초기 샘플이 없습니다. CSV를 가져오세요."));return;}selectedIcdName=sample.IcdName;selectedIcd=[..sample.IcdContent];UpdateIcdPreview();}
     private static List<string> ParseIps(string text)=>text.Split([',',';','\r','\n',' ','\t'],StringSplitOptions.RemoveEmptyEntries).Select(x=>IPAddress.TryParse(x,out var ip)?ip.ToString():x).Distinct().ToList();
     private void SaveProfileClick(object sender,RoutedEventArgs e)
     {
         if(!AdminAction())return;
         try {
-            var p=new RecordProfile {Id=editingProfileId??Guid.NewGuid().ToString("N"),Name=ProfileNameBox.Text.Trim(),IcdName=selectedIcdName,IcdContent=selectedIcd,SenderIps=ParseIps(SenderBox.Text),ReceiverIps=ParseIps(ReceiverBox.Text),BothDirections=BothDirectionsBox.IsChecked==true};p.Validate();
-            SaveChange(next=>{if(next.Profiles.Any(x=>x.Id!=p.Id&&x.Name.Equals(p.Name,StringComparison.OrdinalIgnoreCase)))throw new ArgumentException("프로파일 이름이 중복되었습니다.");next.Profiles.RemoveAll(x=>x.Id==p.Id);next.Profiles.Add(p);});
+            var p=new RecordProfile {Id=editingProfileId??Guid.NewGuid().ToString("N"),Name=ProfileNameBox.Text.Trim(),IcdName=selectedIcdName,IcdContent=[..selectedIcd],SenderIps=ParseIps(SenderBox.Text),ReceiverIps=ParseIps(ReceiverBox.Text),BothDirections=BothDirectionsBox.IsChecked==true};p.Validate();IcdProtection.Seal(session!,p);var allowGuest=GuestIcdAllowedBox.IsChecked==true;
+            SaveChange(next=>{if(next.Profiles.Any(x=>x.Id!=p.Id&&x.Name.Equals(p.Name,StringComparison.OrdinalIgnoreCase)))throw new ArgumentException("프로파일 이름이 중복되었습니다.");next.Profiles.RemoveAll(x=>x.Id==p.Id);next.Profiles.Add(p);next.GuestIcdAllowList.RemoveAll(id=>id==p.IcdId);if(allowGuest)next.GuestIcdAllowList.Add(p.IcdId);});
         }catch(Exception error){ShowError(error);}
     }
     private void DeleteProfileClick(object sender,RoutedEventArgs e)
@@ -163,25 +166,33 @@ public partial class MainWindow : Window
         if(!AdminAction())return;string folder=FolderBox.Text.Trim();
         SaveChange(next=>{if(!Path.IsPathFullyQualified(folder))throw new ArgumentException("기록 폴더는 절대 경로를 입력하세요.");Directory.CreateDirectory(folder);next.OutputDirectory=folder;});
     }
+    private async void ProtectLegacyClick(object sender,RoutedEventArgs e)
+    {
+        if(!AdminAction())return;
+        if(MessageBox.Show(this,"저장된 기록 폴더의 구버전 session.bin 안에 있는 ICD 원본을 암호화합니다. PCAP은 변경하지 않습니다. 진행할까요?","이전 ICD 보호",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;
+        busy=true;SettingsView.IsEnabled=false;UpdateControls();
+        try{var result=await Task.Run(()=>LegacySessionProtection.ProtectFolder(session!,settings.OutputDirectory));StatusText.Text=$"메타데이터 암호화 {result.Updated}개 · 제외 {result.Skipped}개 · 실패 {result.Errors.Count}개";if(result.Errors.Count>0)ShowError(new IOException(string.Join("\n",result.Errors.Take(8))));}
+        catch(Exception error){ShowError(error);}finally{busy=false;SettingsView.IsEnabled=true;UpdateControls();}
+    }
     private async void StartClick(object sender,RoutedEventArgs e)
     {
         if(session==null||busy||engine.IsRunning)return;
         var name=TestNameBox.Text.Trim();busy=true;UpdateControls();
-        try {await Task.Run(()=>engine.Start(session,settings,devices,name));startedAt=DateTime.UtcNow;elapsed=TimeSpan.Zero;SessionText.Text="기록 폴더: "+engine.SessionDirectory;StatusText.Text="기록 시작 · ICD 원본과 IP/NIC 매칭은 session.bin에 함께 보관됩니다.";}
+        try {await Task.Run(()=>engine.Start(session,settings,devices,name));startedAt=DateTime.UtcNow;elapsed=TimeSpan.Zero;SessionText.Text="기록 폴더: "+engine.SessionDirectory;StatusText.Text="기록 시작 · 시험 메타데이터에는 ICD 식별자만 저장하며 원본은 포함하지 않습니다.";}
         catch(Exception error){ShowError(error);}
         finally{busy=false;UpdateControls();UpdateDashboard();}
     }
     private async Task StopRecording()
     {
         if(busy)return;busy=true;UpdateControls();
-        try{await Task.Run(engine.Stop);elapsed=DateTime.UtcNow-startedAt;StatusText.Text=engine.LastError.Length>0?engine.LastError:"기록 중지 · 파일 저장 완료";SessionText.Text="시험 폴더: "+engine.SessionDirectory+"\n"+engine.DriverSummary;}
+        try{await Task.Run(engine.Stop);elapsed=DateTime.UtcNow-startedAt;StatusText.Text=engine.LastError.Length>0?engine.LastError:"기록 중지 · 파일 저장 완료";SessionText.Text="시험 폴더: "+engine.SessionDirectory+(session?.Role==UserRole.Admin?"\n"+engine.DriverSummary:"");}
         catch(Exception error){ShowError(error);}finally{busy=false;UpdateControls();UpdateDashboard();}
     }
     private async void StopClick(object sender,RoutedEventArgs e){if(session!=null&&engine.IsRunning)await StopRecording();}
     private void UpdateControls()
     {
         bool active=engine.IsRunning;
-        StartButton.IsEnabled=session!=null&&!active&&!busy&&settings.Bindings.Count>0;
+        StartButton.IsEnabled=session!=null&&!active&&!busy&&settings.Bindings.Count>0&&!settings.GuestRecordingConflict;
         StopButton.IsEnabled=active&&!busy;TestNameBox.IsEnabled=!active&&!busy;
         ProfileNav.IsEnabled=SettingsNav.IsEnabled=!active&&!busy;
         RunBadge.Text=active?"● 기록 중":busy?"● 처리 중":"● 대기 중";
@@ -197,11 +208,12 @@ public partial class MainWindow : Window
     }
     private void UpdateDashboard()
     {
-        if(session==null)return;var snapshots=engine.Snapshot();
+        if(session==null)return;if(settings.GuestRecordingConflict)SessionText.Text="허용/비허용 ICD의 IP가 겹쳐 guest 기록을 차단합니다. 관리자에게 매칭 분리를 요청하세요.";var snapshots=engine.Snapshot();
         if(snapshots.Count==0)snapshots=settings.Bindings.SelectMany(b=>b.ProfileIds.Select(id=>new MappingSnapshot(b.DeviceName,settings.Profiles.FirstOrDefault(p=>p.Id==id)?.Name??"삭제된 프로파일",0,0,0,0,0,"—",nics.Any(n=>n.Id==b.DeviceId&&n.Capturable)?"대기":"NIC 없음"))).ToList();
         MonitorGrid.ItemsSource=snapshots;MappingTotal.Text=snapshots.Count.ToString();PacketTotal.Text=snapshots.Sum(s=>s.Packets).ToString("N0");ByteTotal.Text=FormatBytes(snapshots.Sum(s=>s.Bytes));
         ElapsedText.Text=(engine.IsRunning?DateTime.UtcNow-startedAt:elapsed).ToString(@"hh\:mm\:ss");
-        if(engine.IsRunning)SessionText.Text=$"시험 폴더: {engine.SessionDirectory}\nNIC 관측 프레임: {engine.ObservedFrames:N0} · 해석 실패: {engine.ParseFailures:N0} · 각 NIC/프로파일별 독립 PCAP 기록";
+        if(engine.IsRunning&&session.Role==UserRole.Guest)SessionText.Text="허용된 ICD만 기록 중 · 시험 폴더: "+engine.SessionDirectory;
+        else if(engine.IsRunning)SessionText.Text=$"시험 폴더: {engine.SessionDirectory}\nNIC 관측 프레임: {engine.ObservedFrames:N0} · 해석 실패: {engine.ParseFailures:N0} · 각 NIC/프로파일별 독립 PCAP 기록";
         UpdateControls();
     }
     private static string FormatBytes(long value)=>value>=1048576?$"{value/1048576.0:F2} MB":value>=1024?$"{value/1024.0:F2} KB":$"{value} B";
@@ -209,12 +221,12 @@ public partial class MainWindow : Window
     {
         if(busy)return;
         if(engine.IsRunning){if(MessageBox.Show(this,"기록을 중지하고 로그아웃할까요?","로그아웃",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;await StopRecording();}
-        timer.Stop();session=null;WorkspaceView.Visibility=Visibility.Collapsed;LoginView.Visibility=Visibility.Visible;UserIdBox.Clear();PasswordInput.Clear();LoginError.Text="";UserIdBox.Focus();
+        timer.Stop();settings.ClearPlaintext();NewEditor();ProfilesList.ItemsSource=null;BindingProfiles.ItemsSource=null;session?.Dispose();session=null;WorkspaceView.Visibility=Visibility.Collapsed;LoginView.Visibility=Visibility.Visible;UserIdBox.Clear();PasswordInput.Clear();LoginError.Text="";UserIdBox.Focus();
     }
     private void WindowClosing(object? sender,CancelEventArgs e)
     {
         if(busy){e.Cancel=true;return;}
         if(engine.IsRunning&&MessageBox.Show(this,"기록을 중지하고 종료할까요?","종료",MessageBoxButton.YesNo)!=MessageBoxResult.Yes){e.Cancel=true;return;}
-        timer.Stop();engine.Dispose();
+        timer.Stop();engine.Dispose();settings.ClearPlaintext();session?.Dispose();
     }
 }

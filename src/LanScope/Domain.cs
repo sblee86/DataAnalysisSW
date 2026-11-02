@@ -2,13 +2,20 @@ using System.IO;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Serialization;
 using PacketDotNet;
 
 namespace LanScope;
 public enum UserRole { Guest, Admin }
-public sealed record LoginSession(string UserId, UserRole Role)
+public sealed class LoginSession : IDisposable
 {
-    public void RequireAdmin() { if(Role != UserRole.Admin) throw new UnauthorizedAccessException("관리자 계정만 사용할 수 있습니다."); }
+    private byte[]? adminKey;
+    public string UserId {get;}
+    public UserRole Role {get;}
+    internal LoginSession(string userId,UserRole role,byte[]? key=null){UserId=userId;Role=role;adminKey=key;}
+    public void RequireAdmin(){if(Role!=UserRole.Admin||adminKey is not {Length:32})throw new UnauthorizedAccessException("관리자 인증이 필요합니다.");}
+    internal ReadOnlySpan<byte> Key {get{RequireAdmin();return adminKey;}}
+    public void Dispose(){if(adminKey!=null)CryptographicOperations.ZeroMemory(adminKey);adminKey=null;}
 }
 public sealed class AccountService
 {
@@ -23,7 +30,7 @@ public sealed class AccountService
             var name=reader.ReadString(); var role=(UserRole)reader.ReadByte(); var iterations=reader.ReadInt32();
             var salt=reader.ReadBytes(16); var hash=reader.ReadBytes(32);
             var actual=Rfc2898DeriveBytes.Pbkdf2(password,salt,iterations,HashAlgorithmName.SHA256,32);
-            if(CryptographicOperations.FixedTimeEquals(actual,hash) && string.Equals(name,id.Trim(),StringComparison.Ordinal)) result=new(name,role);
+            if(CryptographicOperations.FixedTimeEquals(actual,hash) && string.Equals(name,id.Trim(),StringComparison.Ordinal)) {result?.Dispose();byte[]? key=null;if(role==UserRole.Admin){var keySalt=SHA256.HashData(salt.Concat(Encoding.UTF8.GetBytes("LANscope ICD key v1")).ToArray());key=Rfc2898DeriveBytes.Pbkdf2(password,keySalt,600000,HashAlgorithmName.SHA256,32);}result=new(name,role,key);}
             CryptographicOperations.ZeroMemory(actual);
         }
         return result;
@@ -33,9 +40,11 @@ public sealed class RecordProfile
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "";
-    public string IcdName { get; set; } = "";
-    public byte[] IcdContent { get; set; } = [];
-    public string IcdHash => Convert.ToHexString(SHA256.HashData(IcdContent));
+    [JsonIgnore] public string IcdName { get; set; } = "";
+    [JsonIgnore] public byte[] IcdContent { get; set; } = [];
+    public string IcdId {get;set;}="";
+    public byte[] EncryptedIcd {get;set;}=[];
+    public void ClearPlaintext(){CryptographicOperations.ZeroMemory(IcdContent);IcdContent=[];IcdName="";}
     public List<string> SenderIps { get; set; } = [];
     public List<string> ReceiverIps { get; set; } = [];
     public bool BothDirections { get; set; } = true;
@@ -43,9 +52,10 @@ public sealed class RecordProfile
     {
         if(!Guid.TryParseExact(Id,"N",out _)) throw new ArgumentException("프로파일 ID 형식 오류");
         if(string.IsNullOrWhiteSpace(Name) || Name.Length>80) throw new ArgumentException("프로파일 이름을 1~80자로 입력하세요.");
-        if(string.IsNullOrWhiteSpace(IcdName) || IcdContent.Length==0 || IcdContent.Length>16*1024*1024) throw new ArgumentException("ICD 파일을 선택하세요. 최대 16 MB입니다.");
-        if(!IcdName.EndsWith(".csv",StringComparison.OrdinalIgnoreCase))throw new ArgumentException("ICD를 CSV 파일로 다시 선택하세요. 기존 IDL 설정 원본은 유지됩니다.");
-        IcdCsv.Parse(IcdContent);
+        if(IcdContent.Length>0) {
+            if(!IcdName.EndsWith(".csv",StringComparison.OrdinalIgnoreCase))throw new ArgumentException("ICD를 CSV 파일로 다시 선택하세요.");
+            IcdCsv.Parse(IcdContent);
+        }else if(EncryptedIcd.Length==0||IcdId.Length!=64)throw new ArgumentException("관리자가 ICD를 가져와 암호화 저장해야 합니다.");
         if(SenderIps.Count==0 || ReceiverIps.Count==0) throw new ArgumentException("송신 IP와 수신 IP를 각각 1개 이상 입력하세요.");
         if(SenderIps.Concat(ReceiverIps).Any(x=>!IPAddress.TryParse(x,out _))) throw new ArgumentException("유효한 IPv4 또는 IPv6 주소를 입력하세요. CIDR/호스트명은 지원하지 않습니다.");
     }
@@ -67,6 +77,35 @@ public sealed class WorkspaceSettings
     public string OutputDirectory { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),"LANscope","Records");
     public List<RecordProfile> Profiles { get; set; } = [];
     public List<NicBinding> Bindings { get; set; } = [];
+    public List<string> GuestIcdAllowList {get;set;}=[];
+    [JsonIgnore] public bool GuestRecordingConflict {get;set;}
+    private bool HasGuestEndpointConflict()
+    {
+        foreach(var binding in Bindings) {
+            var profiles=Profiles.Where(p=>binding.ProfileIds.Contains(p.Id)).ToList();
+            var allowed=profiles.Where(p=>GuestIcdAllowList.Contains(p.IcdId));
+            var denied=profiles.Where(p=>!GuestIcdAllowList.Contains(p.IcdId));
+            foreach(var a in allowed)foreach(var d in denied) {
+                foreach(var source in a.SenderIps)foreach(var destination in a.ReceiverIps) {
+                    if(IPAddress.TryParse(source,out var src)&&IPAddress.TryParse(destination,out var dst)&&
+                      (d.Matches(src,dst)||(a.BothDirections&&d.Matches(dst,src))))return true;
+                }
+            }
+        }
+        return false;
+    }
+    public WorkspaceSettings ForSession(LoginSession session)
+    {
+        if(session.Role==UserRole.Admin){session.RequireAdmin();return this;}
+        if(session.Role!=UserRole.Guest)throw new UnauthorizedAccessException();
+        var allowed=Profiles.Where(p=>GuestIcdAllowList.Contains(p.IcdId)&&p.EncryptedIcd.Length>0).ToList();
+        var ids=allowed.Select(p=>p.Id).ToHashSet();
+        return new WorkspaceSettings {OutputDirectory=OutputDirectory,GuestIcdAllowList=allowed.Select(p=>p.IcdId).Distinct().ToList(),GuestRecordingConflict=GuestRecordingConflict||HasGuestEndpointConflict(),
+            Profiles=allowed.Select(p=>new RecordProfile{Id=p.Id,Name=p.Name,IcdId=p.IcdId,EncryptedIcd=[..p.EncryptedIcd],SenderIps=[..p.SenderIps],ReceiverIps=[..p.ReceiverIps],BothDirections=p.BothDirections}).ToList(),
+            Bindings=Bindings.Select(b=>new NicBinding{DeviceId=b.DeviceId,DeviceName=b.DeviceName,ProfileIds=b.ProfileIds.Where(ids.Contains).ToList()}).Where(b=>b.ProfileIds.Count>0).ToList()};
+    }
+    public void ClearPlaintext(){foreach(var p in Profiles)p.ClearPlaintext();}
+
     public void ValidateForRecording(IReadOnlyCollection<string> available)
     {
         if(string.IsNullOrWhiteSpace(OutputDirectory)||!Path.IsPathFullyQualified(OutputDirectory)) throw new ArgumentException("기록 폴더를 절대 경로로 지정하세요.");

@@ -3,3 +3,6 @@
 artifacts/
 .vs/
 .nuget/
+
+__pycache__/
+*.pyc

@@ -48,6 +48,8 @@ public sealed class CaptureEngine : IDisposable
     {
         if(!Enum.IsDefined(session.Role))throw new UnauthorizedAccessException();
         if(IsRunning)throw new InvalidOperationException("이미 기록 중입니다.");
+        settings=settings.ForSession(session);
+        if(session.Role==UserRole.Guest&&settings.GuestRecordingConflict)throw new UnauthorizedAccessException("허용/비허용 ICD의 IP 범위가 겹쳐 guest 기록을 차단합니다. 관리자에게 매칭 분리를 요청하세요.");
         settings.ValidateForRecording(available.Select(d=>d.Name).ToList());
         if(string.IsNullOrWhiteSpace(testName)||testName.Length>80)throw new ArgumentException("시험 이름을 1~80자로 입력하세요.");
         if(testName.IndexOfAny(Path.GetInvalidFileNameChars())>=0 || testName.EndsWith('.') || testName.EndsWith(' '))throw new ArgumentException("시험 이름에는 파일명으로 사용할 수 있는 문자를 입력하세요.");
@@ -65,26 +67,31 @@ public sealed class CaptureEngine : IDisposable
                     var file=new PcapFile(Path.Combine(SessionDirectory,$"nic{opened.Count:D2}_{profile.Id}.pcap"),device.LinkType);
                     list.Add(new(binding.DeviceName,profile,file));
                 }
+                device.Filter=BuildFilter(list.Select(t=>t.Profile));
                 device.OnPacketArrival+=PacketArrival;
             }
-            WriteManifest(session,settings,testName);
+            WriteManifest(SessionDirectory,session,settings,testName);
             IsRunning=true;
             foreach(var device in opened)device.StartCapture();
         } catch { Stop(); throw; }
     }
-    private void WriteManifest(LoginSession session,WorkspaceSettings settings,string name)
+    internal static void WriteManifest(string directory,LoginSession session,WorkspaceSettings settings,string name)
     {
-        using var w=new BinaryWriter(File.Create(Path.Combine(SessionDirectory,"session.bin")),Encoding.UTF8);
-        w.Write("LANSCOPE-SESSION-1");w.Write(name);w.Write(DateTime.UtcNow.ToString("O"));w.Write(session.UserId);w.Write(settings.Bindings.Count);
+        using var w=new BinaryWriter(File.Create(Path.Combine(directory,"session.bin")),Encoding.UTF8);
+        w.Write("LANSCOPE-SESSION-2");w.Write(name);w.Write(DateTime.UtcNow.ToString("O"));w.Write(session.UserId);w.Write(settings.Bindings.Count);
         int index=0;
         foreach(var b in settings.Bindings) {
             index++;w.Write(b.DeviceId);w.Write(b.DeviceName);w.Write(b.ProfileIds.Count);
             foreach(var id in b.ProfileIds) {
                 var p=settings.Profiles.Single(x=>x.Id==id);w.Write(p.Id);w.Write(p.Name);w.Write($"nic{index:D2}_{p.Id}.pcap");
-                w.Write(p.IcdName);w.Write(p.IcdContent.Length);w.Write(p.IcdContent);w.Write(p.BothDirections);
-                w.Write(p.SenderIps.Count);foreach(var ip in p.SenderIps)w.Write(ip);w.Write(p.ReceiverIps.Count);foreach(var ip in p.ReceiverIps)w.Write(ip);
+                w.Write(p.IcdId); // Reference only. No CSV filename, schema, raw ICD or encryption keys.
             }
         }
+    }
+    internal static string BuildFilter(IEnumerable<RecordProfile> profiles)
+    {
+        string Hosts(IEnumerable<string> ips,string direction)=>"("+string.Join(" or ",ips.Select(ip=>direction+" host "+IPAddress.Parse(ip)))+")";
+        return string.Join(" or ",profiles.Select(p=>"(("+Hosts(p.SenderIps,"src")+" and "+Hosts(p.ReceiverIps,"dst")+")"+(p.BothDirections?" or ("+Hosts(p.ReceiverIps,"src")+" and "+Hosts(p.SenderIps,"dst")+")":"")+")"));
     }
     private void PacketArrival(object sender,PacketCapture e)
     {

@@ -29,3 +29,11 @@
 - Communication is BIG ENDIAN ONLY. Single-byte values stay unchanged. Reject explicit little endian; default bit numbering is provisional msb0, with explicit lsb0 option independent from byte order.
 - CSV import validates the field layout and shows payload HEX decode preview (including signed and cross-byte bit fields). Live capture still matches IP endpoints; no automatic message framing/CDR/TCP reconstruction. Preserve old IDL config until the admin explicitly replaces it with CSV.
 - Keep design/icd-csv.js and the C# parser consistent; package.sh copies JS alongside docs/index.html. Revalidate sample vectors and both role workflows after UI changes.
+
+## v0.4 ICD confidentiality contract
+
+- User explicitly chose ICD encryption ONLY; preserve standard PCAP output. Never claim OS-level access restrictions for PCAP.
+- AES-256-GCM encrypts CSV filename/source under an admin-password-derived key, independent from the verifier hash. Never persist private encryption/signing keys or plaintext imported ICDs in output/source/Pages. Embedded demo resources use samples.bin ciphertext. Public policy verification key is safe to include.
+- guest permissions default deny and are keyed to ICD content fingerprint across profiles. Load only the authorized guest model without decrypting ICDs. Enforce permissions in CaptureEngine too; block guest capture if allowed/denied profiles on a NIC share endpoint ranges. Driver BPF limits traffic to selected IPs.
+- LSCFG002 is DPAPI-wrapped, admin-signed configuration with sealed ICD fields; verify the pinned public key before use. New session metadata contains references only; never CSV source, schema or original filename. Provide admin-only conversion of old plaintext-bearing session.bin without modifying PCAP.
+- Actual local Windows DPAPI, WPF and Npcap validation remains required. AES/policy/authorization tests run on Linux. Web Pages is a PUBLIC DEMO, not a confidentiality boundary; never put real ICDs there. Temporary admin credentials must change before real confidential ICD use. Credential rotation for existing vaults is not implemented; preserve old key/build/source before any change.

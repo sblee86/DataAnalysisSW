@@ -5,27 +5,57 @@ using System.Text;
 using System.Text.Json;
 
 namespace LanScope;
-public sealed class SettingsStore(string? filePath = null)
+public sealed class SettingsStore(string? filePath = null, byte[]? policyPublicKey = null)
 {
     public string FilePath { get; } = filePath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"LANscope","workspace.bin");
-    public WorkspaceSettings Load()
+    private byte[] PublicKey()
+    {
+        if(policyPublicKey!=null)return policyPublicKey;
+        var assembly=typeof(SettingsStore).Assembly;
+        using var stream=assembly.GetManifestResourceStream("LanScope.Resources.policy-public.bin")??throw new InvalidDataException("설정 검증키가 없습니다.");
+        using var output=new MemoryStream();stream.CopyTo(output);return output.ToArray();
+    }
+    public WorkspaceSettings Load(LoginSession session)
     {
         if(!File.Exists(FilePath)) return new();
         var bytes=File.ReadAllBytes(FilePath);
-        if(bytes.Length<8 || Encoding.ASCII.GetString(bytes,0,8)!="LSCFG001") throw new InvalidDataException("설정파일 형식 오류. 원본 파일은 유지됩니다.");
-        var plain=Protect(bytes[8..],false);
-        try { return JsonSerializer.Deserialize<WorkspaceSettings>(plain)??throw new InvalidDataException("설정파일이 비어 있습니다."); }
-        finally { CryptographicOperations.ZeroMemory(plain); }
+        if(bytes.Length<8)throw new InvalidDataException("설정파일 형식 오류. 원본 파일은 유지됩니다.");
+        string magic=Encoding.ASCII.GetString(bytes,0,8);
+        if(magic=="LSCFG001") {
+            session.RequireAdmin();var legacy=Protect(bytes[8..],false);
+            try {
+                using var json=JsonDocument.Parse(legacy);var upgraded=JsonSerializer.Deserialize<WorkspaceSettings>(legacy)!;
+                var old=json.RootElement.GetProperty("Profiles").EnumerateArray().ToList();
+                for(int i=0;i<upgraded.Profiles.Count;i++) {
+                    var p=upgraded.Profiles[i];p.IcdName=old[i].GetProperty("IcdName").GetString()??"";p.IcdContent=old[i].GetProperty("IcdContent").GetBytesFromBase64();
+                    // Legacy IDL must remain recoverable even though it is no longer a valid recording schema.
+                    IcdProtection.Seal(session,p);
+                }
+                upgraded.GuestIcdAllowList.Clear();Save(session,upgraded);return upgraded;
+            }finally{CryptographicOperations.ZeroMemory(legacy);}
+        }
+        if(magic!="LSCFG002"||bytes.Length<72)throw new InvalidDataException("설정파일 형식 오류. 원본 파일은 유지됩니다.");
+        var ciphertext=bytes[72..];IcdProtection.Verify(PublicKey(),bytes[..8].Concat(ciphertext).ToArray(),bytes[8..72]);
+        var plain=Protect(ciphertext,false);
+        try {
+            var settings=JsonSerializer.Deserialize<WorkspaceSettings>(plain)??throw new InvalidDataException("설정파일이 비어 있습니다.");
+            if(session.Role==UserRole.Admin)foreach(var p in settings.Profiles)IcdProtection.Open(session,p);
+            return settings.ForSession(session);
+        }finally{CryptographicOperations.ZeroMemory(plain);}
     }
     public void Save(LoginSession session, WorkspaceSettings settings)
     {
         session.RequireAdmin();
+        foreach(var profile in settings.Profiles)IcdProtection.Seal(session,profile);
+        settings.GuestIcdAllowList.RemoveAll(id=>!settings.Profiles.Any(p=>p.IcdId==id));
         var plain=JsonSerializer.SerializeToUtf8Bytes(settings); byte[] encrypted;
         try { encrypted=Protect(plain,true); } finally { CryptographicOperations.ZeroMemory(plain); }
+        var signed=Encoding.ASCII.GetBytes("LSCFG002").Concat(encrypted).ToArray();
+        var signature=IcdProtection.Sign(session,signed);IcdProtection.Verify(PublicKey(),signed,signature);
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
         var temp=FilePath+"."+Guid.NewGuid().ToString("N")+".tmp";
         try {
-            using(var file=new FileStream(temp,FileMode.CreateNew,FileAccess.Write)) { file.Write(Encoding.ASCII.GetBytes("LSCFG001"));file.Write(encrypted);file.Flush(true); }
+            using(var file=new FileStream(temp,FileMode.CreateNew,FileAccess.Write)) { file.Write(Encoding.ASCII.GetBytes("LSCFG002"));file.Write(signature);file.Write(encrypted);file.Flush(true); }
             File.SetAttributes(temp,FileAttributes.Hidden);
             if(File.Exists(FilePath)) File.Replace(temp,FilePath,null); else File.Move(temp,FilePath);
         } finally { if(File.Exists(temp)) File.Delete(temp); }
