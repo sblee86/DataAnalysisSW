@@ -17,4 +17,10 @@ check(()=>assert.equal(api.parse('name,byte_offset,bit_length,type,description\n
 check(()=>assert.ok(api.decode(sample('Telemetry'),'Telemetry',new Uint8Array([0,1])).some(f=>f.error.includes('길이 부족'))),'short payload errors');
 check(()=>assert.throws(()=>api.hex('001'),/HEX/),'odd HEX rejected');
 check(()=>assert.throws(()=>api.hex('GG'),/HEX/),'invalid HEX rejected');
+check(()=>{const initial=api.hex('00 01 B2 FF 9C 41 48 00 00'),out=api.write(sample('Telemetry'),'Telemetry','mode','3',initial);assert.equal(out[2],0x72);assert.equal(initial[2],0xb2);assert.equal(api.decode(sample('Telemetry'),'Telemetry',out).find(f=>f.name==='mode').raw,'3')},'write sub-byte field without modifying siblings or caller input');
+check(()=>{const out=api.write(sample('Telemetry'),'Telemetry','temperature','-12.3',api.hex('00 01 B2 FF 9C 41 48 00 00'));assert.equal(Buffer.from(out.slice(3,5)).toString('hex'),'ff85')},'inverse engineering scale writes signed bits');
+check(()=>{const out=api.write(sample('ControlCommand'),'ControlCommand','channel','511',api.hex('00 01 B5 A0 00 64'));assert.equal(Buffer.from(out).toString('hex'),'0001bff00064')},'cross-byte 9-bit write');
+check(()=>{const schema=api.parse('name,byte_offset,bit_offset,bit_length,type,bit_order\nx,0,4,8,uint,lsb0');assert.equal(Buffer.from(api.write(schema,'Default','x','18',api.hex('AB CD'))).toString('hex'),'1bc2')},'LSB-numbered partial-byte write');
+check(()=>assert.throws(()=>api.write(sample('Telemetry'),'Telemetry','mode','8',api.hex('00 01 B2 FF 9C 41 48 00 00')),/범위/),'reject field write overflow');
+check(()=>{const schema=sample('Telemetry'),initial=api.hex('00 01 B2 FF 9C 41 48 00 00');const out=api.write(schema,'Telemetry','voltage','3.25',initial);assert.equal(Buffer.from(out.slice(5)).toString('hex'),'40500000');assert.equal(Buffer.from(api.write(schema,'Telemetry','voltage','1095237632',initial,true).slice(5)).toString('hex'),'41480000')},'float value and raw IEEE bits writes');
 console.log(count+' web CSV parser checks passed');

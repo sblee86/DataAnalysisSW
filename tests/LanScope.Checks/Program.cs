@@ -31,6 +31,13 @@ if(args.Contains("--prepare-resources")) {
  }
  Console.WriteLine("Prepared encrypted sample resources and public policy verification key");return;
 }
+Check(IcdProtection.PublicKey(admin!).SequenceEqual(File.ReadAllBytes(Path.Combine(root,"src/LanScope/Resources/policy-public.bin"))),"policy signing identity matches existing deployed public key");
+Check(GuestIcdAccess.PublicKey(guest!).SequenceEqual(File.ReadAllBytes(Path.Combine(root,"src/LanScope/Resources/guest-conversion-public.bin"))),"guest conversion identity matches existing deployed public key");
+using(var samples=new BinaryReader(File.OpenRead(Path.Combine(root,"src/LanScope/Resources/samples.bin")))) {
+ int count=samples.ReadInt32();bool compatible=count==3;
+ for(int i=0;i<count;i++){var sample=new RecordProfile{Id=samples.ReadString(),Name=samples.ReadString(),IcdId=samples.ReadString()};sample.EncryptedIcd=samples.ReadBytes(samples.ReadInt32());try{IcdProtection.Open(admin!,sample);compatible&=IcdCsv.Parse(sample.IcdContent).Fields.Count>0;}finally{sample.ClearPlaintext();}}
+ Check(compatible,"encrypted resources from previous runtime remain decryptable on .NET 8");
+}
 var p=new RecordProfile {Name="Telemetry",IcdName="Telemetry.csv",IcdContent=File.ReadAllBytes(Path.Combine(root,"samples/Telemetry.csv")),SenderIps=["192.0.2.1"],ReceiverIps=["198.51.100.2"]};p.Validate();
 Check(p.Matches(IPAddress.Parse("192.0.2.1"),IPAddress.Parse("198.51.100.2")),"forward matching");
 Check(p.Matches(IPAddress.Parse("198.51.100.2"),IPAddress.Parse("192.0.2.1")),"reverse matching");
@@ -135,6 +142,8 @@ try {
  File.Delete(csv);using var canceled=new CancellationTokenSource();canceled.Cancel();try{PcapCsvConverter.Convert(admin!,csvSettings,convertProfile.Id,"Default",input,csv,canceled.Token);throw new Exception("Cancellation ignored");}catch(OperationCanceledException){Check(!File.Exists(csv),"canceled conversion removes incomplete output");}
  Check(Directory.GetFiles(conversionDirectory,"*.tmp").Length==0,"conversion does not leave plaintext temporary files");
 }finally{Directory.Delete(conversionDirectory,true);}
+var uiDirectory=Path.Combine(Path.GetTempPath(),"das-ui-"+Guid.NewGuid().ToString("N"));
+try{var ui=new UiPreferences(Path.Combine(uiDirectory,"ui.bin"));Check(ui.LoadFontSize()==13,"default UI font size");ui.SaveFontSize(18);Check(ui.LoadFontSize()==18,"UI font size persists independently of role configuration");Throws(()=>ui.SaveFontSize(30),"UI font size bounds protect layout");}finally{if(Directory.Exists(uiDirectory))Directory.Delete(uiDirectory,true);}
 IcdSchema Parse(string csv)=>IcdCsv.Parse(Encoding.UTF8.GetBytes(csv));
 string Header="message,name,byte_offset,bit_offset,bit_length,type,endian,bit_order,scale,bias,unit,description\n";
 var telemetry=IcdCsv.Parse(File.ReadAllBytes(Path.Combine(root,"samples/Telemetry.csv")));
@@ -142,6 +151,30 @@ Check(telemetry.Fields.Count==6&&telemetry.RequiredBytes("Telemetry")==9,"CSV st
 var values=telemetry.Decode("Telemetry",Convert.FromHexString("0001B2FF9C41480000")).ToDictionary(f=>f.Name);
 Check(values["sequence"].Value=="1"&&values["mode"].Value=="5"&&values["enabled"].Value=="true"&&values["status"].Value=="2","big-endian integer and MSB-numbered bit fields");
 Check(decimal.Parse(values["temperature"].Value,System.Globalization.CultureInfo.InvariantCulture)==-10m&&values["voltage"].Value=="12.5","signed scale and big-endian IEEE float");
+var originalPayload=Convert.FromHexString("0001B2FF9C41480000");var edited=originalPayload.ToArray();telemetry.WriteValue("Telemetry","mode","3",edited);
+Check(edited[2]==0x72&&edited.Where((b,i)=>i!=2).SequenceEqual(originalPayload.Where((b,i)=>i!=2)),"writing MSB bit field preserves sibling bits and other bytes");
+Check(telemetry.Decode("Telemetry",edited).Single(f=>f.Name=="mode").Raw=="3","written bit field reads back");
+telemetry.WriteValue("Telemetry","temperature","-12.3",edited);Check(edited[3]==0xff&&edited[4]==0x85,"engineering value inversely scales to signed BE bits");
+telemetry.WriteValue("Telemetry","voltage","3.25",edited);Check(Convert.ToHexString(edited.AsSpan(5,4))=="40500000","float32 writes big-endian IEEE bits");
+telemetry.WriteValue("Telemetry","enabled","false",edited);Check((edited[2]&0x10)==0&&(edited[2]&0x0f)==2,"boolean bit write preserves neighboring fields");
+var beforeFailure=edited.ToArray();Throws(()=>telemetry.WriteValue("Telemetry","mode","8",edited),"bit field overflow rejected");Check(edited.SequenceEqual(beforeFailure),"invalid write leaves payload unchanged");
+var controlSchema=IcdCsv.Parse(File.ReadAllBytes(Path.Combine(root,"samples/ControlCommand.csv")));var cross=Convert.FromHexString("0001B5A00064");controlSchema.WriteValue("ControlCommand","channel","511",cross);
+Check(Convert.ToHexString(cross)=="0001BFF00064","nine-bit cross-byte write preserves operation/reserved bits");
+var lsbWrite=Parse(Header+"M,x,0,4,8,uint,be,lsb0,1,0,,cross");var lsbPayload=new byte[]{0xab,0xcd};lsbWrite.WriteValue("M","x","18",lsbPayload);Check(Convert.ToHexString(lsbPayload)=="1BC2","LSB-numbered cross-byte write preserves surrounding nibbles");
+var msbWrite=Parse(Header+"M,x,0,4,8,uint,be,msb0,1,0,,cross");var msbPayload=new byte[]{0xab,0xcd};msbWrite.WriteValue("M","x","18",msbPayload);Check(Convert.ToHexString(msbPayload)=="A12D","MSB-numbered cross-byte write preserves surrounding nibbles");
+var signedWrite=Parse("name,byte_offset,bit_length,type\ns,0,3,int");var signedPayload=new byte[]{0x1f};signedWrite.WriteValue("Default","s","-4",signedPayload);Check(signedPayload[0]==0x9f&&signedWrite.Decode("Default",signedPayload)[0].Raw=="-4","signed sub-byte write/read with sign extension");
+var wideWrite=Parse("name,byte_offset,bit_length,type\nu,0,64,uint");var widePayload=new byte[8];wideWrite.WriteValue("Default","u","18446744073709551615",widePayload);Check(widePayload.All(b=>b==255),"uint64 write retains full precision");
+var zeroScale=Parse("name,byte_offset,bit_length,type,scale,bias\nx,0,8,uint,0,5");var zeroPayload=new byte[1];Throws(()=>zeroScale.WriteValue("Default","x","5",zeroPayload),"zero-scale engineering write rejected");zeroScale.WriteValue("Default","x","3",zeroPayload,true);Check(zeroPayload[0]==3,"raw write bypasses non-invertible engineering scale");
+Throws(()=>telemetry.Encode("Telemetry",new Dictionary<string,string>{{"mode","3"},{"status","16"}},originalPayload),"multi-field encoder rejects invalid member");Check(originalPayload.SequenceEqual(Convert.FromHexString("0001B2FF9C41480000")),"multi-field encoding is transactional for caller input");
+telemetry.WriteValue("Telemetry","voltage","1095237632",edited,true);Check(Convert.ToHexString(edited.AsSpan(5,4))=="41480000","float raw IEEE bits round-trip exactly");
+bool bitRanges=true;
+foreach(var order in new[]{"msb0","lsb0"})for(int offset=0;offset<8;offset++)for(int length=1;length<=64;length++) {
+ var layout=Parse(Header+$"M,x,1,{offset},{length},uint,be,{order},1,0,,range");var buffer=Enumerable.Repeat((byte)0xa5,12).ToArray();ulong mask=length==64?ulong.MaxValue:(1UL<<length)-1;ulong number=mask&0xA55AA55AA55AA55AUL;
+ layout.WriteValue("M","x",number.ToString(System.Globalization.CultureInfo.InvariantCulture),buffer,true);bitRanges&=layout.Decode("M",buffer)[0].Raw==number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+ var changed=new HashSet<int>();for(int bit=0;bit<length;bit++){int position=offset+bit;changed.Add((1+position/8)*8+(order=="lsb0"?position%8:7-position%8));}
+ for(int bit=0;bit<buffer.Length*8;bit++)if(!changed.Contains(bit))bitRanges&=((buffer[bit/8]>>(bit%8))&1)==((0xa5>>(bit%8))&1);
+}
+Check(bitRanges,"all 1..64 bit widths and 0..7 offsets preserve non-field bits for both numbering orders");
 var control=IcdCsv.Parse(File.ReadAllBytes(Path.Combine(root,"samples/ControlCommand.csv"))).Decode("ControlCommand",Convert.FromHexString("0001B5A00064")).ToDictionary(f=>f.Name);
 Check(control["channel"].Value=="346"&&decimal.Parse(control["target"].Value,System.Globalization.CultureInfo.InvariantCulture)==1m,"nine-bit cross-byte field");
 var status=IcdCsv.Parse(File.ReadAllBytes(Path.Combine(root,"samples/StatusReport.csv"))).Decode("StatusReport",Convert.FromHexString("850000000112345678")).ToDictionary(f=>f.Name);

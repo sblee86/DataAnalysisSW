@@ -21,8 +21,8 @@ def pack(root,target,skip):
   for p in sorted(root.rglob('*')):
    rel=p.relative_to(root)
    if p.is_file() and not any(x in skip for x in rel.parts): z.write(p,rel)
-pack(repo,out/'LANscope-source.zip',{'.git','bin','obj','.vs','artifacts','downloads','.nuget','nuget-offline','__pycache__'})
-pack(publish,out/'LANscope-win-x64.zip',set())
+pack(repo,out/'SAAM_DAS-source.zip',{'.git','bin','obj','.vs','artifacts','downloads','.nuget','nuget-offline','__pycache__','installers'})
+pack(publish,out/'SAAM_DAS-win-x64.zip',set())
 PY
 cp design/ui-preview.html "$output_dir/ui-preview.html"
 cp design/icd-csv.js "$output_dir/icd-csv.js"

@@ -1,33 +1,33 @@
 [
   {
-    "file": "microsoft.aspnetcore.app.runtime.win-x64.10.0.14.nupkg",
-    "bytes": 12784020,
-    "sha256": "91638ac8382c437e71c0739a0e3123290f9bf48bcd01e616352a86add5571089"
+    "file": "microsoft.aspnetcore.app.runtime.win-x64.8.0.33.nupkg",
+    "bytes": 12188707,
+    "sha256": "8429d2eefd18f93578d45b32faad12d112f9f197b190ab4de4c1561171a83750"
   },
   {
-    "file": "microsoft.net.illink.tasks.10.0.14.nupkg",
-    "bytes": 1535193,
-    "sha256": "e2a71b32b5c135dc2b0c87ea8fba6c9e677332e00bf959fbcdced239b825b75c"
+    "file": "microsoft.net.illink.tasks.8.0.33.nupkg",
+    "bytes": 1442636,
+    "sha256": "3f0e6c6401123bbf85f71e8e9dbd0a5fbe770b8766ddab78533f689f7d27d90c"
   },
   {
-    "file": "microsoft.netcore.app.host.win-x64.10.0.14.nupkg",
-    "bytes": 5791948,
-    "sha256": "2a4547b0e6cf0dd15e723531daa5450d99d4e151105aec0d31f2b0c7cfb286db"
+    "file": "microsoft.netcore.app.host.win-x64.8.0.33.nupkg",
+    "bytes": 5478860,
+    "sha256": "427c42a3955b5756cb79d0aacaf9b5936a3daab51976255bed621e697b4c3251"
   },
   {
-    "file": "microsoft.netcore.app.runtime.win-x64.10.0.14.nupkg",
-    "bytes": 39979900,
-    "sha256": "a3ea61b4a2da6d28e562dd1cdacf80eb4dd6b9727b0a2b47f9d6aba90dbbcb1f"
+    "file": "microsoft.netcore.app.runtime.win-x64.8.0.33.nupkg",
+    "bytes": 36218190,
+    "sha256": "82b2c1ad62b334ba0de2e7c2d957d9bc8045fd1b643a9b119087d4a0a02f5e1c"
   },
   {
-    "file": "microsoft.windowsdesktop.app.ref.10.0.14.nupkg",
-    "bytes": 7717262,
-    "sha256": "67c710eb4a5ee0ea5ae6375223b562dad717d21fdbdb2b61374ff9946d5cebbe"
+    "file": "microsoft.windowsdesktop.app.ref.8.0.33.nupkg",
+    "bytes": 4447630,
+    "sha256": "71cd0596f09209bf15551074078d95d4562ae86ad8a63587f4f1ec07353d3881"
   },
   {
-    "file": "microsoft.windowsdesktop.app.runtime.win-x64.10.0.14.nupkg",
-    "bytes": 39195036,
-    "sha256": "a6dba3ca8b8b5b7945399545d881e0ac294746a7571f2209981934d49ecfe8cc"
+    "file": "microsoft.windowsdesktop.app.runtime.win-x64.8.0.33.nupkg",
+    "bytes": 36842107,
+    "sha256": "e496f8b363ad364aa59075973c587b56c7c5ae54a9a86a8e06462c3891405a2d"
   },
   {
     "file": "packetdotnet.1.4.8.nupkg",
@@ -38,5 +38,20 @@
     "file": "sharppcap.6.3.1.nupkg",
     "bytes": 110872,
     "sha256": "4f7df1f19ab2aa45ceb252abc14a2e9e7d474dd1c2379b5761b28875ce02f1fa"
+  },
+  {
+    "file": "system.memory.4.6.3.nupkg",
+    "bytes": 192935,
+    "sha256": "26078aeb758c9ae985e8bf851f973026061da6a5eb4837204d0c2d2204c72955"
+  },
+  {
+    "file": "system.runtime.compilerservices.unsafe.6.0.0.nupkg",
+    "bytes": 84343,
+    "sha256": "6c41b53e70e9eee298cff3a02ce5acdd15b04125589be0273f0566026720a762"
+  },
+  {
+    "file": "system.text.encoding.codepages.9.0.5.nupkg",
+    "bytes": 3219475,
+    "sha256": "b6b31f845c0632733ad3e514aae77b8052cbd98179a4276195e292a2792477ce"
   }
 ]

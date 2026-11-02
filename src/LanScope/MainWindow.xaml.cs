@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
+using System.Windows.Media;
 using Microsoft.Win32;
 using SharpPcap.LibPcap;
 
@@ -25,9 +26,50 @@ public partial class MainWindow : Window
     private readonly string[] sampleNames=["샘플 A","샘플 B","샘플 C"];
     public MainWindow()
     {
-        InitializeComponent();SampleBox.ItemsSource=sampleNames;SampleBox.SelectedIndex=0;
+        InitializeComponent();ApplyFontSize(uiPreferences.LoadFontSize(),false);UpdateNavColors("dashboard");SampleBox.ItemsSource=sampleNames;SampleBox.SelectedIndex=0;
         timer.Tick+=(_,_)=>Tick();UserIdBox.Focus();
     }
+    private readonly UiPreferences uiPreferences=new();
+    private void UpdateNavColors(string page)
+    {
+        foreach(var item in new[]{(DashboardNav,"dashboard"),(ProfileNav,"profiles"),(SettingsNav,"settings"),(ConvertNav,"conversion")}) {
+            bool selected=item.Item2==page;item.Item1.Background=new SolidColorBrush((Color)ColorConverter.ConvertFromString(selected?"#2B4770":"#142238"));item.Item1.Foreground=new SolidColorBrush((Color)ColorConverter.ConvertFromString(selected?"#F8FAFC":"#CAD6E8"));item.Item1.FontWeight=selected?FontWeights.SemiBold:FontWeights.Normal;
+        }
+    }
+    private void ApplyFontSize(int size,bool persist)
+    {
+        size=Math.Clamp(size,12,18);var keys=Resources.Keys.OfType<string>().Where(k=>k.StartsWith("UiFont")||k.StartsWith("UiLine")||k.StartsWith("UiHeight")||k.StartsWith("UiRow")).ToList();
+        foreach(var key in keys){var number=new string(key.Where(char.IsDigit).ToArray());var value=double.Parse(number,System.Globalization.CultureInfo.InvariantCulture)*size/13.0;Resources[key]=key.StartsWith("UiRow")?new GridLength(value):(object)value;}
+        Resources["UiSidebar"]=new GridLength(216*Math.Max(1,size/13.0));
+        if(FontSizeSlider.Value!=size)FontSizeSlider.Value=size;FontSizeValueText.Text=$"{size} px";
+        if(persist)try{uiPreferences.SaveFontSize(size);}catch(Exception e) when(e is IOException or UnauthorizedAccessException){StatusText.Text="글자 크기 저장 실패: "+e.Message;}
+    }
+    private void ScreenSettingsClick(object sender,RoutedEventArgs e)=>ScreenSettingsPopup.IsOpen=!ScreenSettingsPopup.IsOpen;
+    private void FontSizeChanged(object sender,RoutedPropertyChangedEventArgs<double> e){if(FontSizeValueText!=null)ApplyFontSize((int)e.NewValue,true);}
+    private void ResetFontClick(object sender,RoutedEventArgs e)=>ApplyFontSize(13,true);
+    private static T? Ancestor<T>(DependencyObject? node) where T:DependencyObject
+    {
+        while(node!=null){if(node is T found)return found;node=node is System.Windows.ContentElement?LogicalTreeHelper.GetParent(node):VisualTreeHelper.GetParent(node);}return null;
+    }
+    private void ProfileRightClick(object sender,MouseButtonEventArgs e){var item=Ancestor<ListBoxItem>(e.OriginalSource as DependencyObject);if(item!=null)item.IsSelected=true;}
+    private void GridRightClick(object sender,MouseButtonEventArgs e){var row=Ancestor<DataGridRow>(e.OriginalSource as DependencyObject);if(row!=null)row.IsSelected=true;}
+    private void ProfileKeyDown(object sender,KeyEventArgs e){if(e.Key==Key.Delete&&ProfilesList.SelectedItem!=null){DeleteProfileClick(sender,new());e.Handled=true;}}
+    private void EditContextOpened(object sender,RoutedEventArgs e)
+    {
+        if(sender is ContextMenu menu){menu.FontSize=FontSize;foreach(var item in menu.Items.OfType<MenuItem>())item.IsEnabled=session?.Role==UserRole.Admin&&!engine.IsRunning&&!busy;}
+    }
+    private void RemoveBindingConfirmClick(object sender,RoutedEventArgs e)
+    {
+        if(!AdminAction()||NicGrid.SelectedItem is not NicInfo nic)return;
+        if(MessageBox.Show(this,$"{nic.Name}의 프로파일 매칭을 모두 해제할까요? PCAP 원본은 유지됩니다.","매칭 해제",MessageBoxButton.YesNo)==MessageBoxResult.Yes)RemoveBindingClick(sender,e);
+    }
+    private void RemoveMonitorMappingClick(object sender,RoutedEventArgs e)
+    {
+        if(!AdminAction()||MonitorGrid.SelectedItem is not MappingSnapshot row)return;
+        if(MessageBox.Show(this,$"{row.Nic} → {row.Profile} 매칭을 해제할까요? PCAP 원본은 유지됩니다.","매칭 해제",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;
+        SaveChange(next=>{foreach(var binding in next.Bindings.Where(b=>b.DeviceId==row.DeviceId))binding.ProfileIds.Remove(row.ProfileId);next.Bindings.RemoveAll(b=>b.ProfileIds.Count==0);});
+    }
+    private void ClearPcapSelectionClick(object sender,RoutedEventArgs e){if(!busy){ConvertInputBox.Clear();ConversionResultText.Text="PCAP 선택을 해제했습니다. 원본 파일은 유지됩니다.";}}
     private static byte[] Resource(string suffix)
     {
         var assembly=Assembly.GetExecutingAssembly();
@@ -65,7 +107,7 @@ public partial class MainWindow : Window
         try{(session??throw new UnauthorizedAccessException("로그인이 필요합니다.")).RequireAdmin();if(engine.IsRunning||busy)throw new InvalidOperationException("기록 중에는 설정을 변경할 수 없습니다.");return true;}
         catch(Exception error){ShowError(error);return false;}
     }
-    private void ShowError(Exception error){StatusText.Text=error.Message;MessageBox.Show(this,error.Message,"LANscope",MessageBoxButton.OK,MessageBoxImage.Warning);}
+    private void ShowError(Exception error){StatusText.Text=error.Message;MessageBox.Show(this,error.Message,"SAAM_DAS",MessageBoxButton.OK,MessageBoxImage.Warning);}
     private void SaveChange(Action<WorkspaceSettings> change)
     {
         if(!AdminAction())return;
@@ -80,12 +122,13 @@ public partial class MainWindow : Window
         ConversionView.Visibility=name=="conversion"?Visibility.Visible:Visibility.Collapsed;
         ProfilesView.Visibility=name=="profiles"?Visibility.Visible:Visibility.Collapsed;
         SettingsView.Visibility=name=="settings"?Visibility.Visible:Visibility.Collapsed;
+        UpdateNavColors(name);
         PageTitle.Text=name=="conversion"?"PCAP → CSV 변환":name=="profiles"?"인터페이스 관리":name=="settings"?"기록 설정":"기록 대시보드";
     }
     private void DashboardClick(object sender,RoutedEventArgs e){if(!busy)ShowPage("dashboard");}
     private void ProfilesClick(object sender,RoutedEventArgs e){if(AdminAction())ShowPage("profiles");}
     private void SettingsClick(object sender,RoutedEventArgs e){if(AdminAction())ShowPage("settings");}
-    private void NewEditor(){editingProfileId=null;ProfileNameBox.Text="";SenderBox.Text="";ReceiverBox.Text="";selectedIcd=[];selectedIcdName="";IcdText.Text="선택된 CSV 없음";currentSchema=null;IcdFields.ItemsSource=null;DecodeGrid.ItemsSource=null;MessageBoxSelect.ItemsSource=null;BothDirectionsBox.IsChecked=true;GuestIcdAllowedBox.IsChecked=false;}
+    private void NewEditor(){editingProfileId=null;ProfileNameBox.Text="";SenderBox.Text="";ReceiverBox.Text="";selectedIcd=[];selectedIcdName="";IcdText.Text="선택된 CSV 없음";currentSchema=null;IcdFields.ItemsSource=null;DecodeGrid.ItemsSource=null;MessageBoxSelect.ItemsSource=null;WriteFieldBox.ItemsSource=null;WriteValueBox.Text="0";WriteRawBox.IsChecked=false;BothDirectionsBox.IsChecked=true;GuestIcdAllowedBox.IsChecked=false;}
     private void NewProfileClick(object sender,RoutedEventArgs e){if(AdminAction()){ProfilesList.SelectedItem=null;NewEditor();}}
     private void ProfileSelected(object sender,SelectionChangedEventArgs e)
     {
@@ -102,6 +145,20 @@ public partial class MainWindow : Window
             IcdText.Text=$"{selectedIcdName} · {currentSchema.Fields.Count} fields / {currentSchema.Messages.Length} messages · {currentSchema.EncodingName} · BIG ENDIAN";
             if(currentSchema.Warnings.Count>0)IcdText.Text+="\n"+string.Join(" / ",currentSchema.Warnings);
         }catch(ArgumentException error){IcdText.Text="CSV 오류: "+error.Message;}
+    }
+    private void WriteMessageSelected(object sender,SelectionChangedEventArgs e)
+    {
+        if(WriteFieldBox==null)return;WriteFieldBox.ItemsSource=currentSchema?.Fields.Where(f=>f.Message==MessageBoxSelect.SelectedItem as string).ToList();WriteFieldBox.SelectedIndex=0;
+    }
+    private void WriteFieldClick(object sender,RoutedEventArgs e)
+    {
+        if(!AdminAction())return;
+        try {
+            if(currentSchema==null||MessageBoxSelect.SelectedItem is not string message||WriteFieldBox.SelectedItem is not IcdField field)throw new ArgumentException("정상 CSV와 쓰기 필드를 선택하세요.");
+            var hex=new string(PayloadHexBox.Text.Where(c=>!char.IsWhiteSpace(c)).ToArray());if(hex.Length>65535*2)throw new ArgumentException("payload는 최대 65,535 bytes입니다.");
+            var bytes=hex.Length==0?new byte[currentSchema.RequiredBytes(message)]:Convert.FromHexString(hex);currentSchema.WriteValue(message,field.Name,WriteValueBox.Text,bytes,WriteRawBox.IsChecked==true);
+            PayloadHexBox.Text=string.Join(" ",bytes.Select(b=>b.ToString("X2")));DecodeGrid.ItemsSource=currentSchema.Decode(message,bytes);StatusText.Text="선택 필드 값 쓰기 완료 · 다른 비트 보존 · 네트워크 송신 없음";
+        }catch(Exception error) when(error is ArgumentException or FormatException or OverflowException){ShowError(error);}
     }
     private void DecodePayloadClick(object sender,RoutedEventArgs e)
     {
@@ -239,7 +296,7 @@ public partial class MainWindow : Window
     private void UpdateDashboard()
     {
         if(session==null)return;var snapshots=engine.Snapshot();
-        if(snapshots.Count==0)snapshots=settings.Bindings.SelectMany(b=>b.ProfileIds.Select(id=>new MappingSnapshot(b.DeviceName,settings.Profiles.FirstOrDefault(p=>p.Id==id)?.Name??"삭제된 프로파일",0,0,0,0,0,"—",nics.Any(n=>n.Id==b.DeviceId&&n.Capturable)?"대기":"NIC 없음"))).ToList();
+        if(snapshots.Count==0)snapshots=settings.Bindings.SelectMany(b=>b.ProfileIds.Select(id=>new MappingSnapshot(b.DeviceName,settings.Profiles.FirstOrDefault(p=>p.Id==id)?.Name??"삭제된 프로파일",0,0,0,0,0,"—",nics.Any(n=>n.Id==b.DeviceId&&n.Capturable)?"대기":"NIC 없음",b.DeviceId,id))).ToList();
         MonitorGrid.ItemsSource=snapshots;MappingTotal.Text=snapshots.Count.ToString();PacketTotal.Text=engine.ObservedFrames.ToString("N0");ByteTotal.Text=FormatBytes(engine.RecordedBytes);
         ElapsedText.Text=(engine.IsRunning?DateTime.UtcNow-startedAt:elapsed).ToString(@"hh\:mm\:ss");
         if(engine.IsRunning)SessionText.Text=$"시험 폴더: {engine.SessionDirectory}\nNIC 관측 프레임: {engine.ObservedFrames:N0} · 해석 실패: {engine.ParseFailures:N0} · NIC별 전체 프레임 PCAP 기록";

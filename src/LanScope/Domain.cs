@@ -125,7 +125,7 @@ public sealed class WorkspaceSettings
         }
     }
 }
-public sealed record MappingSnapshot(string Nic, string Profile, long Packets, long Bytes, int MinSize, int MaxSize, double AverageSize, string LastPacket, string State);
+public sealed record MappingSnapshot(string Nic, string Profile, long Packets, long Bytes, int MinSize, int MaxSize, double AverageSize, string LastPacket, string State, string DeviceId="", string ProfileId="");
 public sealed class PacketCounter
 {
     public long Packets {get;private set;} public long Bytes {get;private set;}

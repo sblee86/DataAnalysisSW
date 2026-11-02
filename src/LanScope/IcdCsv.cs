@@ -43,6 +43,41 @@ public sealed class IcdSchema
         }
         return result;
     }
+    public void WriteValue(string message,string fieldName,string value,Span<byte> payload,bool rawValue=false)
+    {
+        var f=Fields.SingleOrDefault(f=>f.Message==message&&f.Name==fieldName)??throw new ArgumentException("메시지/필드를 선택하세요.");
+        if(payload.Length<f.ByteOffset+(f.BitOffset+f.BitLength+7)/8)throw new ArgumentException("쓰기 대상 payload 길이가 부족합니다.");
+        if(f.Type=="bytes") {
+            var text=new string(value.Where(c=>!char.IsWhiteSpace(c)).ToArray());var bytes=Convert.FromHexString(text);
+            if(bytes.Length!=f.BitLength/8)throw new ArgumentException("bytes 값은 정의된 길이와 같아야 합니다.");bytes.CopyTo(payload.Slice(f.ByteOffset));return;
+        }
+        ulong raw;
+        if(f.Type=="bool")raw=value.Trim().ToLowerInvariant() switch {"true" or "1"=>1,"false" or "0"=>0,_=>throw new ArgumentException("bool 값은 true/false 또는 1/0입니다.")};
+        else if(f.Type is "float32" or "float64") {
+            if(rawValue){if(!ulong.TryParse(value,NumberStyles.Integer,CultureInfo.InvariantCulture,out raw)||(f.Type=="float32"&&raw>uint.MaxValue))throw new ArgumentException("raw float는 IEEE754 비트 패턴의 부호 없는 정수입니다.");}
+            else {
+                if(!double.TryParse(value,NumberStyles.Float,CultureInfo.InvariantCulture,out var number)||!double.IsFinite(number))throw new ArgumentException("유한한 실수를 입력하세요.");
+                if(f.Scale==0)throw new ArgumentException("scale=0인 필드는 실제값을 역변환할 수 없습니다. raw 모드를 사용하세요.");number=(number-(double)f.Bias)/(double)f.Scale;
+                if(!double.IsFinite(number))throw new ArgumentException("실수 범위 초과");
+                if(f.Type=="float32"){var single=(float)number;if(!float.IsFinite(single))throw new ArgumentException("float32 범위 초과");raw=unchecked((uint)BitConverter.SingleToInt32Bits(single));}else raw=unchecked((ulong)BitConverter.DoubleToInt64Bits(number));
+            }
+        }else {
+            if(!decimal.TryParse(value,NumberStyles.Float,CultureInfo.InvariantCulture,out var number))throw new ArgumentException("정수/실제값을 입력하세요.");
+            if(!rawValue){if(f.Scale==0)throw new ArgumentException("scale=0인 필드는 실제값을 역변환할 수 없습니다. raw 모드를 사용하세요.");number=checked((number-f.Bias)/f.Scale);}
+            if(decimal.Truncate(number)!=number)throw new ArgumentException("비트 필드 정수로 정확히 표현할 수 없는 값입니다.");
+            if(f.Type=="int") {
+                decimal minimum=f.BitLength==64?long.MinValue:-(1L<<(f.BitLength-1)),maximum=f.BitLength==64?long.MaxValue:(1L<<(f.BitLength-1))-1;
+                if(number<minimum||number>maximum)throw new ArgumentException("부호 있는 비트 필드 범위 초과");raw=unchecked((ulong)(long)number);if(f.BitLength<64)raw&=(1UL<<f.BitLength)-1;
+            }else{decimal maximum=f.BitLength==64?ulong.MaxValue:(1UL<<f.BitLength)-1;if(number<0||number>maximum)throw new ArgumentException("부호 없는 비트 필드 범위 초과");raw=(ulong)number;}
+        }
+        // Validate first; only the selected physical bit range is changed below.
+        int left=f.BitLength,index=f.ByteOffset,position=f.BitOffset;
+        while(left>0){int take=Math.Min(8-position,left),shift=f.BitOrder=="lsb0"?position:8-position-take,mask=((1<<take)-1)<<shift;int chunk=(int)((raw>>(left-take))&(ulong)((1<<take)-1));payload[index]=(byte)((payload[index]&~mask)|(chunk<<shift));left-=take;index++;position=0;}
+    }
+    public byte[] Encode(string message,IReadOnlyDictionary<string,string> values,byte[]? initial=null,bool rawValue=false)
+    {
+        if(!Messages.Contains(message))throw new ArgumentException("메시지를 선택하세요.");var bytes=initial?.ToArray()??new byte[RequiredBytes(message)];foreach(var item in values)WriteValue(message,item.Key,item.Value,bytes,rawValue);return bytes;
+    }
     // Each byte slice retains its numeric value; slices concatenate in big-endian order.
     public static ulong ExtractBits(ReadOnlySpan<byte> payload,IcdField f)
     {

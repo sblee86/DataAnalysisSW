@@ -58,7 +58,7 @@ public sealed class CaptureEngine : IDisposable
                 opened.Add(device);
                 device.Open(new DeviceConfiguration {Mode=DeviceModes.Promiscuous,ReadTimeout=250,Snaplen=65535});
                 var profiles=binding.ProfileIds.Select(id=>settings.Profiles.Single(p=>p.Id==id)).ToList();
-                recordings.Add(device.Name,new NicRecording(Path.Combine(SessionDirectory,$"nic{opened.Count:D2}.pcap"),binding.DeviceName,device.LinkType,profiles));
+                recordings.Add(device.Name,new NicRecording(Path.Combine(SessionDirectory,$"nic{opened.Count:D2}.pcap"),binding.DeviceName,device.LinkType,profiles,device.Name));
                 // No ICD/IP BPF: both roles persist ALL frames delivered by each selected NIC.
                 device.OnPacketArrival+=PacketArrival;
             }
