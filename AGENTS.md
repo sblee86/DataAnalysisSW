@@ -1,39 +1,31 @@
-# Project workflow
+# Project workflow — current v0.5 contract
 
-- Primary application: Windows WPF, C#/.NET 10. Use the existing checkout; no extra worktrees unless requested.
-- For each delivered revision, build the WPF Windows x64 app and provide a downloadable repository ZIP and build ZIP. Be explicit about untested Windows runtime behavior.
-- Maintain design/ui-preview.html with the same colors, layout, labels and screen states as the WPF UI. Deliver its HTML link for user review, plus a screenshot when available.
-- Mark demonstration data clearly; never imply real capture works unless implemented and verified on Windows with Npcap.
-- Build in Linux using EnableWindowsTargeting=true; run WPF and live Npcap validation on Windows. Offline packet analysis can be tested in Linux.
-- Do not include .git, build caches or credentials in source ZIPs. Include source, lockfiles, documentation and preview.
+- Primary app: Windows WPF, C#/.NET 10. Use the existing checkout; no worktrees unless requested. Preserve unrelated user changes.
+- Every delivered revision includes GitHub links to the Windows x64 build ZIP, full repository ZIP (with offline NuGet), and rendered GitHub Pages UI. Internal /workspace download links do not work for this user.
+- Windows cross-build uses EnableWindowsTargeting; run actual WPF/DPAPI/Npcap validation on Windows. Never call a Linux build Windows runtime verification.
+- Keep design/ui-preview.html and design/icd-csv.js synced to docs/index.html and docs/icd-csv.js with scripts/package.sh. Pages uses main /docs. Web is PUBLIC DEMO ONLY; login admin/admin is explicitly requested for UI review. Windows credentials and vault keys remain separate.
+- Bundle required original .nupkg files in nuget-offline/ with hashes; preserve signatures/TLS verification. Full GitHub repository ZIP includes feed; downloads/LANscope-source.zip is code-only. Exclude .git, caches, bin/obj, credentials and real confidential ICDs from artifacts.
 
-- User needs accessible GitHub links; internal /workspace file links did not work. When authorized to publish a delivery, upload artifacts to GitHub and verify remote files, then provide GitHub download links. Exclude downloads/ from packaged source ZIP to avoid recursive archives.
+## Roles — user clarification supersedes ALL earlier guest recording restrictions
 
-- UI review must open as a website via GitHub Pages at https://sblee86.github.io/DataAnalysisSW/ . Keep docs/index.html byte-identical to design/ui-preview.html and publish docs/ on main. Do not substitute a GitHub source-view link for a rendered preview. Distinguish uploaded Pages source from verified live publication.
-- Include all required NuGet .nupkg files in nuget-offline/ (including Windows host, reference and self-contained runtime packs) with a SHA-256 manifest. Preserve original package signatures. Verify restore with an empty package cache and only the local feed. Windows users build via scripts/build-offline.ps1 after installing the pinned SDK.
-- Full repository ZIP from GitHub includes the offline NuGet feed. downloads/LANscope-source.zip is code-only to stay within GitHub's per-file limit; label it accordingly.
+- BOTH admin and guest record ALL frames Npcap delivers on the SAME configured NICs to standard PCAP, including non-IP and unmatched traffic. No ICD permission filter/BPF may discard recording data. NIC configuration selects devices; each NIC still requires at least one interface mapping.
+- All interfaces and their classification counters are visible to both roles. Top counts/bytes measure full NIC records, not sum of overlapping interface matches.
+- ONLY admin adds/edits/deletes interfaces/CSV ICDs/IPs, NIC mappings and output paths.
+- ICD allowlist applies ONLY to PCAP→CSV value conversion. admin converts all; guest converts explicitly allowed ICDs only. Default deny conversion must NEVER disable PCAP collection.
+- Same-NIC/IP ambiguity between permitted and restricted ICDs may block GUEST CSV CONVERSION only, not recording. Message framing/discriminators await actual IDLStudio CSV input.
+- App conversion permissions do not prevent external tools from analyzing standard PCAP files. Do not promise OS file access controls, retrospective revocation, or anti-debug security.
 
-## v0.2 application contract
+## ICD confidentiality and decoding
 
-- admin: profile/ICD/IP settings, NIC matching, output directory, recording start/stop and monitoring. guest: recording start/stop and monitoring; no configuration mutation. Enforce permissions in settings services as well as visibility.
-- Store salted PBKDF2 hashes in embedded Resources/accounts.bin; never add plaintext account passwords to source/configuration. Account regeneration prompts securely via scripts/set-accounts.py. Include resources in the single Windows EXE.
-- Mutable workspace settings are a Hidden binary file in Windows LocalAppData, encrypted with DPAPI CurrentUser. Never silently reset corrupt settings. Both app roles share that Windows user's configuration.
-- Match individual IPv4/IPv6 sender/receiver addresses; optional reverse flow. At least one profile is required per enabled NIC. Each test creates a unique directory and one PCAP per NIC/profile. Session metadata includes the original ICD in binary form.
-- Sample ICDs are hand-written OMG IDL examples, not verified IDLStudio exports. Current capture matching is IP-based; do not claim IDL payload decoding.
-- Keep the HTML preview aligned with login, roles, profile/settings screens and monitoring. Browser NICs/recording are clearly labeled simulations. Live Windows capture and DPAPI require Windows verification.
-- Run tests/LanScope.Checks with password test bindings for the delivered temporary accounts; never log them. Windows-specific tests must be reported skipped when run on Linux.
+- Active input is IDLStudio CSV; actual export sample pending. Explicit provisional rules: docs/CSV-ICD.md. All communications BIG ENDIAN; single bytes unchanged. Default msb0 numbering is provisional and separate from endian; explicit lsb0 supported.
+- Admin-only import/schema/HEX editing. Encrypt source/filename with AES-GCM under separately derived admin password key. Never persist private keys, plaintext imported ICDs, or real ICDs in repo/Pages. Encrypted demo samples and public verification/recipient keys may be embedded.
+- Guest encrypted ICD envelopes use ECDH recipient public key, created ONLY for conversion-allowed ICDs. Guest source decrypts internally only during authorized conversion; no original/schema editor. Exported CSV necessarily exposes permitted field names/values.
+- Mutable config is Hidden + DPAPI CurrentUser, with admin signature verified against EXE-pinned public key. New session metadata contains references only, not ICD source/filename/structure. Legacy metadata conversion is admin-only and leaves PCAP unchanged.
+- Credential regeneration updates account/public-key/demo resources together. Existing vault key rotation is not implemented: preserve old build/password/source before changing deployed credentials.
 
-## v0.3 CSV ICD contract
+## Recording and CSV conversion
 
-- Active ICD input is IDLStudio CSV. Actual export sample is pending; never claim verified IDLStudio compatibility. Explicit provisional schema is in docs/CSV-ICD.md.
-- Communication is BIG ENDIAN ONLY. Single-byte values stay unchanged. Reject explicit little endian; default bit numbering is provisional msb0, with explicit lsb0 option independent from byte order.
-- CSV import validates the field layout and shows payload HEX decode preview (including signed and cross-byte bit fields). Live capture still matches IP endpoints; no automatic message framing/CDR/TCP reconstruction. Preserve old IDL config until the admin explicitly replaces it with CSV.
-- Keep design/icd-csv.js and the C# parser consistent; package.sh copies JS alongside docs/index.html. Revalidate sample vectors and both role workflows after UI changes.
-
-## v0.4 ICD confidentiality contract
-
-- User explicitly chose ICD encryption ONLY; preserve standard PCAP output. Never claim OS-level access restrictions for PCAP.
-- AES-256-GCM encrypts CSV filename/source under an admin-password-derived key, independent from the verifier hash. Never persist private encryption/signing keys or plaintext imported ICDs in output/source/Pages. Embedded demo resources use samples.bin ciphertext. Public policy verification key is safe to include.
-- guest permissions default deny and are keyed to ICD content fingerprint across profiles. Load only the authorized guest model without decrypting ICDs. Enforce permissions in CaptureEngine too; block guest capture if allowed/denied profiles on a NIC share endpoint ranges. Driver BPF limits traffic to selected IPs.
-- LSCFG002 is DPAPI-wrapped, admin-signed configuration with sealed ICD fields; verify the pinned public key before use. New session metadata contains references only; never CSV source, schema or original filename. Provide admin-only conversion of old plaintext-bearing session.bin without modifying PCAP.
-- Actual local Windows DPAPI, WPF and Npcap validation remains required. AES/policy/authorization tests run on Linux. Web Pages is a PUBLIC DEMO, not a confidentiality boundary; never put real ICDs there. Temporary admin credentials must change before real confidential ICD use. Credential rotation for existing vaults is not implemented; preserve old key/build/source before any change.
+- One unique directory per test; one whole-NIC standard PCAP per selected NIC. Interface matches are counters only. Snapshot all original frame bytes before parsing.
+- CSV service checks permission independently before creating output and rechecks current signed config at job start. Stream complete matching UDP datagrams into values CSV; TCP reassembly/automatic message discrimination/CDR inference are unsupported. Report skips and field decode errors; never fabricate values.
+- Cancellation/failure removes partial temp CSV; never overwrite original PCAP. Keep input and output distinct.
+- Test production domain/crypto/recording/conversion classes via tests/LanScope.Checks; secrets via named test bindings, never printed. Windows-specific checks are skipped explicitly in Linux. Web test script for this revision is /workspace/.setup/verify-v05.cjs.

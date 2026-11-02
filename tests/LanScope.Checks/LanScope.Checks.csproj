@@ -3,10 +3,13 @@
   <ItemGroup>
     <Compile Include="../../src/LanScope/Domain.cs" Link="Domain.cs" />
     <Compile Include="../../src/LanScope/IcdProtection.cs" Link="IcdProtection.cs" />
+    <Compile Include="../../src/LanScope/GuestIcdAccess.cs" Link="GuestIcdAccess.cs" />
     <Compile Include="../../src/LanScope/LegacySessionProtection.cs" Link="LegacySessionProtection.cs" />
     <Compile Include="../../src/LanScope/IcdCsv.cs" Link="IcdCsv.cs" />
     <Compile Include="../../src/LanScope/SettingsStore.cs" Link="SettingsStore.cs" />
     <Compile Include="../../src/LanScope/CaptureEngine.cs" Link="CaptureEngine.cs" />
+    <Compile Include="../../src/LanScope/NicRecording.cs" Link="NicRecording.cs" />
+    <Compile Include="../../src/LanScope/PcapCsvConverter.cs" Link="PcapCsvConverter.cs" />
     <PackageReference Include="SharpPcap" Version="6.3.1" />
     <PackageReference Include="PacketDotNet" Version="1.4.8" />
   </ItemGroup>

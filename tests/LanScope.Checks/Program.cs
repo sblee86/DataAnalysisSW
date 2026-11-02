@@ -22,6 +22,7 @@ if(args.Contains("--prepare-resources")) {
  var names=new[]{"Telemetry.csv","ControlCommand.csv","StatusReport.csv"};
  var directory=Path.Combine(root,"src/LanScope/Resources");
  File.WriteAllBytes(Path.Combine(directory,"policy-public.bin"),IcdProtection.PublicKey(admin!));
+ File.WriteAllBytes(Path.Combine(directory,"guest-conversion-public.bin"),GuestIcdAccess.PublicKey(guest!));
  using var writer=new BinaryWriter(File.Create(Path.Combine(directory,"samples.bin")),Encoding.UTF8);
  writer.Write(3);
  for(int i=0;i<names.Length;i++) {
@@ -52,8 +53,7 @@ try {
  var packet=Packet.ParsePacket(raw.LinkLayerType,raw.Data);var ip=packet.Extract<IPPacket>();var udp=packet.Extract<UdpPacket>();
  Check(p.Matches(ip.SourceAddress,ip.DestinationAddress)&&udp.SourcePort==12345&&udp.DestinationPort==53&&Encoding.ASCII.GetString(udp.PayloadData)=="TEST","recorded packet matches profile and UDP payload");
  Check(reader.GetNextPacket(out _)==GetPacketStatus.NoRemainingPackets,"PCAP EOF");
- using var filtered=new CaptureFileReaderDevice(output);filtered.Open();filtered.Filter=CaptureEngine.BuildFilter([p]);Check(filtered.GetNextPacket(out _)==GetPacketStatus.PacketRead,"driver BPF compiles and admits permitted endpoints");
- var other=new RecordProfile{SenderIps=["203.0.113.1"],ReceiverIps=["203.0.113.2"]};using var excluded=new CaptureFileReaderDevice(output);excluded.Open();excluded.Filter=CaptureEngine.BuildFilter([other]);Check(excluded.GetNextPacket(out _)==GetPacketStatus.NoRemainingPackets,"driver BPF excludes unrelated endpoints");
+
 }finally{File.Delete(output);}
 // Session state is clean before any live device is opened.
 var engine=new CaptureEngine();Check(engine.Snapshot().Count==0,"new session has no stale counters");engine.ClearHistory();engine.Dispose();
@@ -62,7 +62,7 @@ try {new SettingsStore().Save(guest!,settings);throw new Exception("Guest persis
 if(OperatingSystem.IsWindows()) {
  var path=Path.Combine(Path.GetTempPath(),"lanscope-settings-"+Guid.NewGuid().ToString("N")+".bin");
  try {
-  var store=new SettingsStore(path,IcdProtection.PublicKey(admin!));store.Save(admin!,settings);var loaded=store.Load(admin!);
+  var store=new SettingsStore(path,IcdProtection.PublicKey(admin!),GuestIcdAccess.PublicKey(guest!));store.Save(admin!,settings);var loaded=store.Load(admin!);
   Check(loaded.Profiles.Single().IcdContent.SequenceEqual(p.IcdContent)&&loaded.Bindings.Single().ProfileIds.Single()==p.Id,"Windows DPAPI configuration round-trip");
   Check(File.GetAttributes(path).HasFlag(FileAttributes.Hidden),"Windows settings hidden attribute");
   Check(!Encoding.UTF8.GetString(File.ReadAllBytes(path)).Contains(p.Name),"Windows settings plaintext concealed");
@@ -84,23 +84,23 @@ using(var wrongKey=new LoginSession("test-admin",UserRole.Admin,System.Security.
 var publicKey=IcdProtection.PublicKey(admin!);var policy=Encoding.UTF8.GetBytes("allowed ICD policy");var signature=IcdProtection.Sign(admin!,policy);IcdProtection.Verify(publicKey,policy,signature);Check(true,"guest policy independently verifies with public key");
 policy[0]^=1;CryptoRejected(()=>IcdProtection.Verify(publicKey,policy,signature),"policy allowlist tampering rejected");
 Denied(()=>IcdProtection.Sign(guest!,policy),"guest cannot sign a forged permission policy");
-Check(settings.ForSession(guest!).Profiles.Count==0&&settings.ForSession(guest!).Bindings.Count==0,"legacy and new ICD permissions default deny");
+Check(settings.ForSession(guest!).Profiles.Count==1&&settings.ForSession(guest!).Bindings.Count==1,"guest records all configured interfaces with no CSV grants");
 settings.GuestIcdAllowList.Add(p.IcdId);var guestView=settings.ForSession(guest!);
-Check(guestView.Profiles.Count==1&&guestView.Bindings.Single().ProfileIds.Single()==p.Id,"guest receives only allowed profile and NIC mappings");
+Check(guestView.Profiles.Count==1&&guestView.Bindings.Single().ProfileIds.Single()==p.Id,"guest recording retains all profile and NIC mappings");
 Check(guestView.Profiles[0].IcdContent.Length==0&&guestView.Profiles[0].IcdName=="","guest view never carries decrypted ICD or filename");
 var hidden=new RecordProfile{Name="Hidden ICD",IcdName="Hidden.csv",IcdContent=Encoding.UTF8.GetBytes("name,byte_offset,bit_length,type\nsecret,0,8,uint"),SenderIps=["203.0.113.1"],ReceiverIps=["203.0.113.2"]};IcdProtection.Seal(admin!,hidden);settings.Profiles.Add(hidden);settings.Bindings[0].ProfileIds.Add(hidden.Id);
-Check(settings.ForSession(guest!).Profiles.All(x=>x.Id!=hidden.Id)&&!settings.ForSession(guest!).GuestRecordingConflict,"unpermitted ICD mappings removed while disjoint recording allowed");
+Check(settings.ForSession(guest!).Profiles.Any(x=>x.Id==hidden.Id),"CSV-restricted interface remains visible for PCAP recording");
 hidden.SenderIps=[..p.SenderIps];hidden.ReceiverIps=[..p.ReceiverIps];
-Check(settings.ForSession(guest!).GuestRecordingConflict,"same-endpoint mixed ICDs block guest recording");
-try{new CaptureEngine().Start(guest!,settings,[],"Denied");throw new Exception("Guest capture bypassed policy");}catch(UnauthorizedAccessException){Check(true,"capture engine independently blocks mixed-endpoint guest recording before opening NIC");}
-settings.GuestIcdAllowList.Remove(p.IcdId);Check(settings.ForSession(guest!).Profiles.Count==0,"revoked ICD disappears from guest view");
+Check(settings.HasGuestConversionConflict(p.Id),"same-endpoint mixed ICDs affect CSV conversion only");
+Throws(()=>new CaptureEngine().Start(guest!,settings,[],"Unavailable"),"guest capture checks NIC availability, not CSV permissions");
+settings.GuestIcdAllowList.Remove(p.IcdId);Check(settings.ForSession(guest!).Profiles.Count==2,"revoking CSV grant does not hide or disable PCAP recording");
 var held=p.IcdContent;p.ClearPlaintext();Check(held.All(b=>b==0),"plaintext buffer is zeroed when clearing workspace");IcdProtection.Open(admin!,p);
 using(var expired=auth.Login("admin",Environment.GetEnvironmentVariable("LANSCOPE_TEST_ADMIN")!)!){expired.Dispose();Denied(()=>IcdProtection.Sign(expired,policy),"logout/disposed session cannot use admin key");}
 var manifestDirectory=Path.Combine(Path.GetTempPath(),"lanscope-manifest-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(manifestDirectory);
 try {
  settings.GuestIcdAllowList.Add(p.IcdId);var permitted=settings.ForSession(guest!);CaptureEngine.WriteManifest(manifestDirectory,guest!,permitted,"Test");
  var manifest=File.ReadAllBytes(Path.Combine(manifestDirectory,"session.bin"));
- Check(manifest.AsSpan().IndexOf(originalCsv)<0&&!Encoding.UTF8.GetString(manifest).Contains(originalName)&&!Encoding.UTF8.GetString(manifest).Contains(hidden.Name),"session metadata excludes ICD source, CSV filename and denied ICD metadata");
+ Check(manifest.AsSpan().IndexOf(originalCsv)<0&&!Encoding.UTF8.GetString(manifest).Contains(originalName),"session metadata excludes ICD source, CSV filename (recording includes all interface aliases)");
 }finally{Directory.Delete(manifestDirectory,true);}
 var legacyDirectory=Path.Combine(Path.GetTempPath(),"lanscope-legacy-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(legacyDirectory);
 try {
@@ -111,6 +111,30 @@ try {
  Check(IcdProtection.Decrypt(admin!,"legacy-session-metadata",protectedBytes).SequenceEqual(legacyBytes),"legacy metadata remains exactly recoverable by admin");
  Check(LegacySessionProtection.ProtectFolder(admin!,legacyDirectory).Updated==0,"legacy metadata encryption is repeatable without double wrapping");
 }finally{Directory.Delete(legacyDirectory,true);}
+var conversionDirectory=Path.Combine(Path.GetTempPath(),"lanscope-convert-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(conversionDirectory);
+try {
+ var convertProfile=new RecordProfile{Name="Convert A",IcdName="private.csv",IcdContent=Encoding.UTF8.GetBytes("name,byte_offset,bit_length,type\nvalue,0,8,uint"),SenderIps=["192.0.2.1"],ReceiverIps=["198.51.100.2"]};IcdProtection.Seal(admin!,convertProfile);
+ var csvSettings=new WorkspaceSettings{OutputDirectory=conversionDirectory,Profiles=[convertProfile],Bindings=[new NicBinding{DeviceId="nic",DeviceName="NIC",ProfileIds=[convertProfile.Id]}]};
+ string input=Path.Combine(conversionDirectory,"all.pcap"),csv=Path.Combine(conversionDirectory,"values.csv");
+ var unrelated=frame.ToArray();unrelated[29]=99;
+ var arp=Convert.FromHexString("FFFFFFFFFFFF00112233445508060001080006040001001122334455C0000201000000000000C0000202");
+ using(var recording=new NicRecording(input,"NIC",LinkLayers.Ethernet,[convertProfile])) {
+  recording.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,1),frame));recording.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,2),unrelated));recording.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,3),arp));recording.Flush();
+  Check(recording.Total.Packets==3&&recording.Snapshot("stopped").Single().Packets==1,"NIC PCAP includes matching, unrelated and ARP frames; interface counters remain separate");
+ }
+ using(var reader=new CaptureFileReaderDevice(input)){reader.Open();int count=0;while(reader.GetNextPacket(out _)==GetPacketStatus.PacketRead)count++;Check(count==3,"whole NIC standard PCAP contains every received frame");}
+ Denied(()=>PcapCsvConverter.Messages(guest!,csvSettings,convertProfile.Id),"guest CSV conversion denied by default while recording remains available");
+ Denied(()=>PcapCsvConverter.Convert(guest!,csvSettings,convertProfile.Id,"Default",input,csv),"conversion service rejects forbidden ICD before output creation");Check(!File.Exists(csv),"denied conversion leaves no CSV file");
+ csvSettings.GuestIcdAllowList.Add(convertProfile.IcdId);GuestIcdAccess.Seal(admin!,convertProfile,GuestIcdAccess.PublicKey(guest!));
+ Check(PcapCsvConverter.Messages(guest!,csvSettings,convertProfile.Id).SequenceEqual(new[]{"Default"}),"authorized guest can use encrypted ICD for conversion without admin key");
+ var result=PcapCsvConverter.Convert(guest!,csvSettings.ForSession(guest!),convertProfile.Id,"Default",input,csv);var text=File.ReadAllText(csv);
+ Check(result.Frames==3&&result.Rows==1&&result.Skipped==2&&text.Contains("\"84\""),"allowed guest PCAP to CSV decodes UDP value and skips unrelated/ARP frames");
+ File.Delete(csv);csvSettings.GuestIcdAllowList.Clear();Denied(()=>PcapCsvConverter.Convert(guest!,csvSettings,convertProfile.Id,"Default",input,csv),"revoked CSV permission checked on each conversion");
+ var adminResult=PcapCsvConverter.Convert(admin!,csvSettings,convertProfile.Id,"Default",input,csv);Check(adminResult.Rows==1,"admin converts all interfaces without guest grants");
+ Throws(()=>PcapCsvConverter.Convert(admin!,csvSettings,convertProfile.Id,"Default",input,input),"conversion cannot overwrite original PCAP");
+ File.Delete(csv);using var canceled=new CancellationTokenSource();canceled.Cancel();try{PcapCsvConverter.Convert(admin!,csvSettings,convertProfile.Id,"Default",input,csv,canceled.Token);throw new Exception("Cancellation ignored");}catch(OperationCanceledException){Check(!File.Exists(csv),"canceled conversion removes incomplete output");}
+ Check(Directory.GetFiles(conversionDirectory,"*.tmp").Length==0,"conversion does not leave plaintext temporary files");
+}finally{Directory.Delete(conversionDirectory,true);}
 IcdSchema Parse(string csv)=>IcdCsv.Parse(Encoding.UTF8.GetBytes(csv));
 string Header="message,name,byte_offset,bit_offset,bit_length,type,endian,bit_order,scale,bias,unit,description\n";
 var telemetry=IcdCsv.Parse(File.ReadAllBytes(Path.Combine(root,"samples/Telemetry.csv")));

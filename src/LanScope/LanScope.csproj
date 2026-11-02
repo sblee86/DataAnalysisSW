@@ -14,6 +14,7 @@
     <EmbeddedResource Include="Resources/accounts.bin" />
     <EmbeddedResource Include="Resources/samples.bin" />
     <EmbeddedResource Include="Resources/policy-public.bin" />
+    <EmbeddedResource Include="Resources/guest-conversion-public.bin" />
     <PackageReference Include="SharpPcap" Version="6.3.1" />
     <PackageReference Include="PacketDotNet" Version="1.4.8" />
   </ItemGroup>

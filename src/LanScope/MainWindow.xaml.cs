@@ -54,7 +54,7 @@ public partial class MainWindow : Window
             LoginView.Visibility=Visibility.Collapsed;WorkspaceView.Visibility=Visibility.Visible;
             bool admin=session.Role==UserRole.Admin;ProfileNav.Visibility=SettingsNav.Visibility=admin?Visibility.Visible:Visibility.Collapsed;
             AccountText.Text=$"{session.UserId} / {session.Role.ToString().ToUpperInvariant()}";
-            PermissionNote.Text=admin?"전체 설정과 기록을 관리할 수 있습니다.":"관리자가 허용한 ICD의\n기록·조회만 가능합니다.\nICD 원본과 구조는 비공개입니다.";
+            PermissionNote.Text=admin?"전체 설정과 기록을 관리할 수 있습니다.":"모든 PCAP 기록이 가능합니다.\nICD별 CSV 변환은 제한됩니다.\n인터페이스 수정은 관리자 전용입니다.";
             ReloadEditors();ScanNics();ShowPage("dashboard");timer.Start();UpdateDashboard();
         } catch(Exception error) {candidate?.Dispose();session?.Dispose();session=null;timer.Stop();WorkspaceView.Visibility=Visibility.Collapsed;LoginView.Visibility=Visibility.Visible;LoginError.Text="로그인/설정 로드 실패: "+error.Message;}
         finally {busy=false;LoginButton.IsEnabled=true;UpdateControls();}
@@ -75,13 +75,14 @@ public partial class MainWindow : Window
     private void ReloadEditors(){ProfilesList.ItemsSource=session?.Role==UserRole.Admin?settings.Profiles:null;BindingProfiles.ItemsSource=session?.Role==UserRole.Admin?settings.Profiles:null;FolderBox.Text=settings.OutputDirectory;OutputText.Text="기록 폴더: "+settings.OutputDirectory;NewEditor();}
     private void ShowPage(string name)
     {
-        if(name!="dashboard"&&(session?.Role!=UserRole.Admin||engine.IsRunning||busy))return;
+        if((name=="profiles"||name=="settings")&&(session?.Role!=UserRole.Admin||engine.IsRunning||busy))return;
         DashboardView.Visibility=name=="dashboard"?Visibility.Visible:Visibility.Collapsed;
+        ConversionView.Visibility=name=="conversion"?Visibility.Visible:Visibility.Collapsed;
         ProfilesView.Visibility=name=="profiles"?Visibility.Visible:Visibility.Collapsed;
         SettingsView.Visibility=name=="settings"?Visibility.Visible:Visibility.Collapsed;
-        PageTitle.Text=name=="profiles"?"기록 프로파일":name=="settings"?"기록 설정":"기록 대시보드";
+        PageTitle.Text=name=="conversion"?"PCAP → CSV 변환":name=="profiles"?"인터페이스 관리":name=="settings"?"기록 설정":"기록 대시보드";
     }
-    private void DashboardClick(object sender,RoutedEventArgs e)=>ShowPage("dashboard");
+    private void DashboardClick(object sender,RoutedEventArgs e){if(!busy)ShowPage("dashboard");}
     private void ProfilesClick(object sender,RoutedEventArgs e){if(AdminAction())ShowPage("profiles");}
     private void SettingsClick(object sender,RoutedEventArgs e){if(AdminAction())ShowPage("settings");}
     private void NewEditor(){editingProfileId=null;ProfileNameBox.Text="";SenderBox.Text="";ReceiverBox.Text="";selectedIcd=[];selectedIcdName="";IcdText.Text="선택된 CSV 없음";currentSchema=null;IcdFields.ItemsSource=null;DecodeGrid.ItemsSource=null;MessageBoxSelect.ItemsSource=null;BothDirectionsBox.IsChecked=true;GuestIcdAllowedBox.IsChecked=false;}
@@ -166,6 +167,35 @@ public partial class MainWindow : Window
         if(!AdminAction())return;string folder=FolderBox.Text.Trim();
         SaveChange(next=>{if(!Path.IsPathFullyQualified(folder))throw new ArgumentException("기록 폴더는 절대 경로를 입력하세요.");Directory.CreateDirectory(folder);next.OutputDirectory=folder;});
     }
+    private CancellationTokenSource? conversionCancellation;
+    private void ConversionClick(object sender,RoutedEventArgs e)
+    {
+        if(session==null||busy||engine.IsRunning)return;
+        ConversionProfileBox.ItemsSource=settings.Profiles;ShowPage("conversion");
+    }
+    private void ChoosePcapClick(object sender,RoutedEventArgs e)
+    {
+        if(session==null||busy)return;var d=new OpenFileDialog{Title="변환할 PCAP 선택",Filter="PCAP (*.pcap)|*.pcap"};if(d.ShowDialog()==true)ConvertInputBox.Text=d.FileName;
+    }
+    private void ConversionProfileSelected(object sender,SelectionChangedEventArgs e)
+    {
+        ConversionMessageBox.ItemsSource=null;ConvertButton.IsEnabled=false;
+        if(session==null||ConversionProfileBox.SelectedItem is not RecordProfile p)return;
+        try{var fresh=File.Exists(store.FilePath)?store.Load(session):settings;try{ConversionMessageBox.ItemsSource=PcapCsvConverter.Messages(session,fresh,p.Id);ConversionMessageBox.SelectedIndex=0;ConversionAccessText.Text="CSV 값 변환 허용 · ICD 원본/구조 편집은 관리자 전용";ConvertButton.IsEnabled=!busy;}finally{if(!ReferenceEquals(fresh,settings))fresh.ClearPlaintext();}}
+        catch(Exception error){ConversionAccessText.Text=error.Message;}
+    }
+    private async void ConvertClick(object sender,RoutedEventArgs e)
+    {
+        if(session==null||busy||engine.IsRunning||ConversionProfileBox.SelectedItem is not RecordProfile p||ConversionMessageBox.SelectedItem is not string message)return;
+        if(!File.Exists(ConvertInputBox.Text)){ShowError(new ArgumentException("PCAP 파일을 선택하세요."));return;}
+        var dialog=new SaveFileDialog{Title="변환 CSV 저장",Filter="CSV (*.csv)|*.csv",FileName=Path.GetFileNameWithoutExtension(ConvertInputBox.Text)+"_values.csv"};if(dialog.ShowDialog()!=true)return;
+        var input=ConvertInputBox.Text;busy=true;ConvertButton.IsEnabled=false;CancelConvertButton.IsEnabled=true;ConversionProfileBox.IsEnabled=false;conversionCancellation=new();UpdateControls();
+        try{var fresh=File.Exists(store.FilePath)?store.Load(session):settings;try{var result=await Task.Run(()=>PcapCsvConverter.Convert(session,fresh,p.Id,message,input,dialog.FileName,conversionCancellation.Token));ConversionResultText.Text=$"변환 완료: {result.Rows:N0}행 · 전체 {result.Frames:N0}프레임 · 제외 {result.Skipped:N0}개 · 해석 오류 행 {result.RowsWithErrors:N0}개\n{dialog.FileName}";}finally{if(!ReferenceEquals(fresh,settings))fresh.ClearPlaintext();}}
+        catch(OperationCanceledException){ConversionResultText.Text="변환을 취소했습니다. 미완료 CSV는 남기지 않습니다.";}
+        catch(Exception error){ShowError(error);}
+        finally{conversionCancellation.Dispose();conversionCancellation=null;busy=false;CancelConvertButton.IsEnabled=false;ConversionProfileBox.IsEnabled=true;UpdateControls();ConversionProfileSelected(this,new SelectionChangedEventArgs(System.Windows.Controls.Primitives.Selector.SelectionChangedEvent,Array.Empty<object>(),Array.Empty<object>()));}
+    }
+    private void CancelConvertClick(object sender,RoutedEventArgs e)=>conversionCancellation?.Cancel();
     private async void ProtectLegacyClick(object sender,RoutedEventArgs e)
     {
         if(!AdminAction())return;
@@ -185,16 +215,16 @@ public partial class MainWindow : Window
     private async Task StopRecording()
     {
         if(busy)return;busy=true;UpdateControls();
-        try{await Task.Run(engine.Stop);elapsed=DateTime.UtcNow-startedAt;StatusText.Text=engine.LastError.Length>0?engine.LastError:"기록 중지 · 파일 저장 완료";SessionText.Text="시험 폴더: "+engine.SessionDirectory+(session?.Role==UserRole.Admin?"\n"+engine.DriverSummary:"");}
+        try{await Task.Run(engine.Stop);elapsed=DateTime.UtcNow-startedAt;StatusText.Text=engine.LastError.Length>0?engine.LastError:"기록 중지 · 파일 저장 완료";SessionText.Text="시험 폴더: "+engine.SessionDirectory+("\n"+engine.DriverSummary);}
         catch(Exception error){ShowError(error);}finally{busy=false;UpdateControls();UpdateDashboard();}
     }
     private async void StopClick(object sender,RoutedEventArgs e){if(session!=null&&engine.IsRunning)await StopRecording();}
     private void UpdateControls()
     {
         bool active=engine.IsRunning;
-        StartButton.IsEnabled=session!=null&&!active&&!busy&&settings.Bindings.Count>0&&!settings.GuestRecordingConflict;
+        StartButton.IsEnabled=session!=null&&!active&&!busy&&settings.Bindings.Count>0;
         StopButton.IsEnabled=active&&!busy;TestNameBox.IsEnabled=!active&&!busy;
-        ProfileNav.IsEnabled=SettingsNav.IsEnabled=!active&&!busy;
+        ProfileNav.IsEnabled=SettingsNav.IsEnabled=ConvertNav.IsEnabled=!active&&!busy;
         RunBadge.Text=active?"● 기록 중":busy?"● 처리 중":"● 대기 중";
     }
     private async void Tick()
@@ -208,12 +238,11 @@ public partial class MainWindow : Window
     }
     private void UpdateDashboard()
     {
-        if(session==null)return;if(settings.GuestRecordingConflict)SessionText.Text="허용/비허용 ICD의 IP가 겹쳐 guest 기록을 차단합니다. 관리자에게 매칭 분리를 요청하세요.";var snapshots=engine.Snapshot();
+        if(session==null)return;var snapshots=engine.Snapshot();
         if(snapshots.Count==0)snapshots=settings.Bindings.SelectMany(b=>b.ProfileIds.Select(id=>new MappingSnapshot(b.DeviceName,settings.Profiles.FirstOrDefault(p=>p.Id==id)?.Name??"삭제된 프로파일",0,0,0,0,0,"—",nics.Any(n=>n.Id==b.DeviceId&&n.Capturable)?"대기":"NIC 없음"))).ToList();
-        MonitorGrid.ItemsSource=snapshots;MappingTotal.Text=snapshots.Count.ToString();PacketTotal.Text=snapshots.Sum(s=>s.Packets).ToString("N0");ByteTotal.Text=FormatBytes(snapshots.Sum(s=>s.Bytes));
+        MonitorGrid.ItemsSource=snapshots;MappingTotal.Text=snapshots.Count.ToString();PacketTotal.Text=engine.ObservedFrames.ToString("N0");ByteTotal.Text=FormatBytes(engine.RecordedBytes);
         ElapsedText.Text=(engine.IsRunning?DateTime.UtcNow-startedAt:elapsed).ToString(@"hh\:mm\:ss");
-        if(engine.IsRunning&&session.Role==UserRole.Guest)SessionText.Text="허용된 ICD만 기록 중 · 시험 폴더: "+engine.SessionDirectory;
-        else if(engine.IsRunning)SessionText.Text=$"시험 폴더: {engine.SessionDirectory}\nNIC 관측 프레임: {engine.ObservedFrames:N0} · 해석 실패: {engine.ParseFailures:N0} · 각 NIC/프로파일별 독립 PCAP 기록";
+        if(engine.IsRunning)SessionText.Text=$"시험 폴더: {engine.SessionDirectory}\nNIC 관측 프레임: {engine.ObservedFrames:N0} · 해석 실패: {engine.ParseFailures:N0} · NIC별 전체 프레임 PCAP 기록";
         UpdateControls();
     }
     private static string FormatBytes(long value)=>value>=1048576?$"{value/1048576.0:F2} MB":value>=1024?$"{value/1024.0:F2} KB":$"{value} B";
@@ -221,7 +250,7 @@ public partial class MainWindow : Window
     {
         if(busy)return;
         if(engine.IsRunning){if(MessageBox.Show(this,"기록을 중지하고 로그아웃할까요?","로그아웃",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;await StopRecording();}
-        timer.Stop();settings.ClearPlaintext();NewEditor();ProfilesList.ItemsSource=null;BindingProfiles.ItemsSource=null;session?.Dispose();session=null;WorkspaceView.Visibility=Visibility.Collapsed;LoginView.Visibility=Visibility.Visible;UserIdBox.Clear();PasswordInput.Clear();LoginError.Text="";UserIdBox.Focus();
+        timer.Stop();settings.ClearPlaintext();NewEditor();ConversionProfileBox.ItemsSource=null;ConversionMessageBox.ItemsSource=null;ConversionAccessText.Text="";ConversionResultText.Text="";ProfilesList.ItemsSource=null;BindingProfiles.ItemsSource=null;session?.Dispose();session=null;WorkspaceView.Visibility=Visibility.Collapsed;LoginView.Visibility=Visibility.Visible;UserIdBox.Clear();PasswordInput.Clear();LoginError.Text="";UserIdBox.Focus();
     }
     private void WindowClosing(object? sender,CancelEventArgs e)
     {

@@ -22,7 +22,7 @@ def main():
         data+=encode_string(user)+bytes([role])+struct.pack('<i',600000)+salt+hashlib.pbkdf2_hmac('sha256',password.encode(),salt,600000,32)
     path=Path(__file__).resolve().parents[1]/'src/LanScope/Resources/accounts.bin'
     root=path.parents[3]
-    tracked=[path,path.parent/'policy-public.bin',path.parent/'samples.bin']
+    tracked=[path,path.parent/'policy-public.bin',path.parent/'samples.bin',path.parent/'guest-conversion-public.bin']
     before={p:p.read_bytes() if p.exists() else None for p in tracked}
     try:
         path.write_bytes(data)

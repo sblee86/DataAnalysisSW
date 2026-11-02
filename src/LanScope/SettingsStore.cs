@@ -5,7 +5,7 @@ using System.Text;
 using System.Text.Json;
 
 namespace LanScope;
-public sealed class SettingsStore(string? filePath = null, byte[]? policyPublicKey = null)
+public sealed class SettingsStore(string? filePath = null, byte[]? policyPublicKey = null, byte[]? guestPublicKey = null)
 {
     public string FilePath { get; } = filePath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"LANscope","workspace.bin");
     private byte[] PublicKey()
@@ -46,7 +46,7 @@ public sealed class SettingsStore(string? filePath = null, byte[]? policyPublicK
     public void Save(LoginSession session, WorkspaceSettings settings)
     {
         session.RequireAdmin();
-        foreach(var profile in settings.Profiles)IcdProtection.Seal(session,profile);
+        foreach(var profile in settings.Profiles){IcdProtection.Seal(session,profile);if(settings.GuestIcdAllowList.Contains(profile.IcdId))GuestIcdAccess.Seal(session,profile,guestPublicKey??GuestIcdAccess.EmbeddedPublicKey());else profile.GuestConversionIcd=[];}
         settings.GuestIcdAllowList.RemoveAll(id=>!settings.Profiles.Any(p=>p.IcdId==id));
         var plain=JsonSerializer.SerializeToUtf8Bytes(settings); byte[] encrypted;
         try { encrypted=Protect(plain,true); } finally { CryptographicOperations.ZeroMemory(plain); }
