@@ -22,3 +22,10 @@
 - Sample ICDs are hand-written OMG IDL examples, not verified IDLStudio exports. Current capture matching is IP-based; do not claim IDL payload decoding.
 - Keep the HTML preview aligned with login, roles, profile/settings screens and monitoring. Browser NICs/recording are clearly labeled simulations. Live Windows capture and DPAPI require Windows verification.
 - Run tests/LanScope.Checks with password test bindings for the delivered temporary accounts; never log them. Windows-specific tests must be reported skipped when run on Linux.
+
+## v0.3 CSV ICD contract
+
+- Active ICD input is IDLStudio CSV. Actual export sample is pending; never claim verified IDLStudio compatibility. Explicit provisional schema is in docs/CSV-ICD.md.
+- Communication is BIG ENDIAN ONLY. Single-byte values stay unchanged. Reject explicit little endian; default bit numbering is provisional msb0, with explicit lsb0 option independent from byte order.
+- CSV import validates the field layout and shows payload HEX decode preview (including signed and cross-byte bit fields). Live capture still matches IP endpoints; no automatic message framing/CDR/TCP reconstruction. Preserve old IDL config until the admin explicitly replaces it with CSV.
+- Keep design/icd-csv.js and the C# parser consistent; package.sh copies JS alongside docs/index.html. Revalidate sample vectors and both role workflows after UI changes.

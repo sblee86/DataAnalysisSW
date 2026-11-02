@@ -1,0 +1,7 @@
+message,name,byte_offset,bit_offset,bit_length,type,endian,bit_order,scale,bias,unit,description
+Telemetry,sequence,0,0,16,uint,be,msb0,1,0,,Sequence counter
+Telemetry,mode,2,0,3,bitfield,be,msb0,1,0,,Top three bits
+Telemetry,enabled,2,3,1,bool,be,msb0,1,0,,Enable flag
+Telemetry,status,2,4,4,uint,be,msb0,1,0,,Low nibble
+Telemetry,temperature,3,0,16,int,be,msb0,0.1,0,degC,"Signed temperature, scaled by 0.1"
+Telemetry,voltage,5,0,32,float32,be,msb0,1,0,V,IEEE 754

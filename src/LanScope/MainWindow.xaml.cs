@@ -22,7 +22,7 @@ public partial class MainWindow : Window
     private bool busy; private int failedLogins;private DateTime blockedUntil;
     private DateTime startedAt;private TimeSpan elapsed;
     private string? editingProfileId;private byte[] selectedIcd=[];private string selectedIcdName="";
-    private readonly string[] sampleNames=["Telemetry.idl","ControlCommand.idl","StatusReport.idl"];
+    private readonly string[] sampleNames=["Telemetry.csv","ControlCommand.csv","StatusReport.csv"];
     public MainWindow()
     {
         InitializeComponent();SampleBox.ItemsSource=sampleNames;SampleBox.SelectedIndex=0;
@@ -81,22 +81,42 @@ public partial class MainWindow : Window
     private void DashboardClick(object sender,RoutedEventArgs e)=>ShowPage("dashboard");
     private void ProfilesClick(object sender,RoutedEventArgs e){if(AdminAction())ShowPage("profiles");}
     private void SettingsClick(object sender,RoutedEventArgs e){if(AdminAction())ShowPage("settings");}
-    private void NewEditor(){editingProfileId=null;ProfileNameBox.Text="";SenderBox.Text="";ReceiverBox.Text="";selectedIcd=[];selectedIcdName="";IcdText.Text="선택된 ICD 없음";BothDirectionsBox.IsChecked=true;}
+    private void NewEditor(){editingProfileId=null;ProfileNameBox.Text="";SenderBox.Text="";ReceiverBox.Text="";selectedIcd=[];selectedIcdName="";IcdText.Text="선택된 CSV 없음";currentSchema=null;IcdFields.ItemsSource=null;DecodeGrid.ItemsSource=null;MessageBoxSelect.ItemsSource=null;BothDirectionsBox.IsChecked=true;}
     private void NewProfileClick(object sender,RoutedEventArgs e){if(AdminAction()){ProfilesList.SelectedItem=null;NewEditor();}}
     private void ProfileSelected(object sender,SelectionChangedEventArgs e)
     {
         if(ProfilesList.SelectedItem is not RecordProfile p)return;
-        editingProfileId=p.Id;ProfileNameBox.Text=p.Name;SenderBox.Text=string.Join(", ",p.SenderIps);ReceiverBox.Text=string.Join(", ",p.ReceiverIps);selectedIcd=p.IcdContent;selectedIcdName=p.IcdName;BothDirectionsBox.IsChecked=p.BothDirections;UpdateIcdText();
+        editingProfileId=p.Id;ProfileNameBox.Text=p.Name;SenderBox.Text=string.Join(", ",p.SenderIps);ReceiverBox.Text=string.Join(", ",p.ReceiverIps);selectedIcd=p.IcdContent;selectedIcdName=p.IcdName;BothDirectionsBox.IsChecked=p.BothDirections;UpdateIcdPreview();
     }
-    private void UpdateIcdText()=>IcdText.Text=$"{selectedIcdName} · {selectedIcd.Length:N0} bytes · 원본 내장 보관";
+    private IcdSchema? currentSchema;
+    private void UpdateIcdPreview()
+    {
+        currentSchema=null;IcdFields.ItemsSource=null;DecodeGrid.ItemsSource=null;MessageBoxSelect.ItemsSource=null;
+        try {
+            if(!selectedIcdName.EndsWith(".csv",StringComparison.OrdinalIgnoreCase))throw new ArgumentException("기존 IDL 원본을 유지합니다. CSV로 다시 선택한 후 저장하세요.");
+            currentSchema=IcdCsv.Parse(selectedIcd);IcdFields.ItemsSource=currentSchema.Fields;MessageBoxSelect.ItemsSource=currentSchema.Messages;MessageBoxSelect.SelectedIndex=0;
+            IcdText.Text=$"{selectedIcdName} · {currentSchema.Fields.Count} fields / {currentSchema.Messages.Length} messages · {currentSchema.EncodingName} · BIG ENDIAN";
+            if(currentSchema.Warnings.Count>0)IcdText.Text+="\n"+string.Join(" / ",currentSchema.Warnings);
+        }catch(ArgumentException error){IcdText.Text="CSV 오류: "+error.Message;}
+    }
+    private void DecodePayloadClick(object sender,RoutedEventArgs e)
+    {
+        if(!AdminAction())return;
+        try {
+            if(currentSchema==null||MessageBoxSelect.SelectedItem is not string message)throw new ArgumentException("정상 CSV와 메시지를 선택하세요.");
+            var hex=new string(PayloadHexBox.Text.Where(c=>!char.IsWhiteSpace(c)).ToArray());
+            if(hex.Length>65535*2)throw new ArgumentException("payload는 최대 65,535 bytes입니다.");
+            DecodeGrid.ItemsSource=currentSchema.Decode(message,Convert.FromHexString(hex));
+        }catch(Exception error) when(error is ArgumentException or FormatException){ShowError(error);}
+    }
     private void ChooseIcdClick(object sender,RoutedEventArgs e)
     {
         if(!AdminAction())return;
-        var d=new OpenFileDialog {Title="IDLStudio 출력 ICD 파일 선택",Filter="ICD / IDL files|*.idl;*.xml;*.icd;*.json|All files|*.*"};
+        var d=new OpenFileDialog {Title="IDLStudio CSV ICD 선택",Filter="IDLStudio CSV (*.csv)|*.csv"};
         if(d.ShowDialog()!=true)return;
-        try{var info=new FileInfo(d.FileName);if(info.Length==0||info.Length>16*1024*1024)throw new ArgumentException("ICD는 1 byte ~ 16 MB이어야 합니다.");selectedIcd=File.ReadAllBytes(d.FileName);selectedIcdName=info.Name;UpdateIcdText();}catch(Exception error){ShowError(error);}
+        try{var info=new FileInfo(d.FileName);if(info.Length==0||info.Length>16*1024*1024)throw new ArgumentException("ICD는 1 byte ~ 16 MB이어야 합니다.");var bytes=File.ReadAllBytes(d.FileName);IcdCsv.Parse(bytes);selectedIcd=bytes;selectedIcdName=info.Name;UpdateIcdPreview();}catch(Exception error){ShowError(error);}
     }
-    private void UseSampleClick(object sender,RoutedEventArgs e){if(!AdminAction())return;selectedIcdName=(string)SampleBox.SelectedItem;selectedIcd=Resource(selectedIcdName);UpdateIcdText();}
+    private void UseSampleClick(object sender,RoutedEventArgs e){if(!AdminAction())return;selectedIcdName=(string)SampleBox.SelectedItem;selectedIcd=Resource(selectedIcdName);UpdateIcdPreview();}
     private static List<string> ParseIps(string text)=>text.Split([',',';','\r','\n',' ','\t'],StringSplitOptions.RemoveEmptyEntries).Select(x=>IPAddress.TryParse(x,out var ip)?ip.ToString():x).Distinct().ToList();
     private void SaveProfileClick(object sender,RoutedEventArgs e)
     {

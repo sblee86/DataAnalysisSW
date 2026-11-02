@@ -1,0 +1,5 @@
+message,name,byte_offset,bit_offset,bit_length,type,endian,bit_order,scale,bias,unit,description
+StatusReport,healthy,0,7,1,bool,be,lsb0,1,0,,High physical bit with lsb0 numbering
+StatusReport,error_code,0,0,7,uint,be,lsb0,1,0,,Low seven physical bits
+StatusReport,sequence,1,0,32,uint,be,msb0,1,0,,Sequence counter
+StatusReport,device_id,5,0,32,bytes,be,msb0,1,0,,Opaque four bytes

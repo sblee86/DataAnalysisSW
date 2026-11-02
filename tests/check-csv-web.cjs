@@ -1,0 +1,20 @@
+const assert=require('node:assert/strict'),fs=require('fs'),path=require('path');
+require('../design/icd-csv.js');const api=globalThis.LanScopeCsv,root=path.resolve(__dirname,'..');let count=0;
+function check(fn,label){fn();count++;console.log('PASS: '+label)}
+const sample=n=>api.parse(fs.readFileSync(path.join(root,'samples',n+'.csv'),'utf8'));
+check(()=>{const values=api.decode(sample('Telemetry'),'Telemetry',api.hex('00 01 B2 FF 9C 41 48 00 00'));assert.deepEqual(values.map(f=>f.raw),['1','5','1','2','-100','1095237632']);assert.equal(values[4].value,'-10.0');assert.equal(values[5].value,'12.5')},'telemetry BE / signed scale / float32');
+check(()=>assert.equal(api.decode(sample('ControlCommand'),'ControlCommand',api.hex('00 01 B5 A0 00 64'))[2].value,'346'),'cross-byte 9-bit field');
+check(()=>{const f=api.decode(sample('StatusReport'),'StatusReport',api.hex('85 00 00 00 01 12 34 56 78'));assert.equal(f[0].value,'true');assert.equal(f[1].value,'5');assert.equal(f[3].value,'12345678')},'LSB numbering and byte arrays');
+check(()=>{const s=api.parse('name,byte_offset,bit_length,type\nx,0,8,uint');for(let i=0;i<256;i++)assert.equal(api.decode(s,'Default',new Uint8Array([i]))[0].value,String(i))},'all single bytes unchanged');
+check(()=>assert.equal(api.decode(api.parse('name,byte_offset,bit_length,type\nx,0,64,uint'),'Default',api.hex('FF FF FF FF FF FF FF FF'))[0].value,'18446744073709551615'),'uint64 exact engineering value');
+check(()=>assert.equal(api.decode(api.parse('name,byte_offset,bit_length,type\nx,0,64,int'),'Default',api.hex('80 00 00 00 00 00 00 00'))[0].value,'-9223372036854775808'),'signed64 minimum');
+check(()=>assert.throws(()=>api.parse('name,byte_offset,bit_length,type,endian\nx,0,16,uint,le'),/빅엔디언/),'little endian rejected');
+check(()=>assert.throws(()=>api.parse('name,byte_offset,bit_length,type\nx,0,8,uint\ny,0,8,uint'),/겹칩니다/),'overlapping fields rejected');
+check(()=>assert.throws(()=>api.parse('name,byte_offset,bit_length,type\nx,0,8,uint\nx,1,8,uint'),/중복/),'duplicate field rejected');
+check(()=>assert.throws(()=>api.parse('name,byte_offset,type\nx,0,uint'),/필수/),'missing headers rejected');
+check(()=>assert.throws(()=>api.parse('name,byte_offset,bit_length,type\n"broken,0,8,uint'),/따옴표/),'unclosed quote rejected');
+check(()=>assert.equal(api.parse('name,byte_offset,bit_length,type,description\nx,0,8,uint,"a,b ""quote""\nnext line"').fields[0].description,'a,b "quote"\nnext line'),'RFC4180 escaped quotes/newlines');
+check(()=>assert.ok(api.decode(sample('Telemetry'),'Telemetry',new Uint8Array([0,1])).some(f=>f.error.includes('길이 부족'))),'short payload errors');
+check(()=>assert.throws(()=>api.hex('001'),/HEX/),'odd HEX rejected');
+check(()=>assert.throws(()=>api.hex('GG'),/HEX/),'invalid HEX rejected');
+console.log(count+' web CSV parser checks passed');

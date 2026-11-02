@@ -7,6 +7,7 @@ output_dir="$(cd "$output_dir" && pwd)"
 cd "$repo_dir"
 mkdir -p docs
 cp design/ui-preview.html docs/index.html
+cp design/icd-csv.js docs/icd-csv.js
 touch docs/.nojekyll
 dotnet restore src/LanScope/LanScope.csproj -r win-x64 --locked-mode
 publish_dir="$(mktemp -d "$output_dir/.publish-XXXXXX")"
@@ -24,3 +25,4 @@ pack(repo,out/'LANscope-source.zip',{'.git','bin','obj','.vs','artifacts','downl
 pack(publish,out/'LANscope-win-x64.zip',set())
 PY
 cp design/ui-preview.html "$output_dir/ui-preview.html"
+cp design/icd-csv.js "$output_dir/icd-csv.js"

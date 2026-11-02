@@ -1,0 +1,6 @@
+message,name,byte_offset,bit_offset,bit_length,type,endian,bit_order,scale,bias,unit,description
+ControlCommand,sequence,0,0,16,uint,be,msb0,1,0,,Sequence counter
+ControlCommand,operation,2,0,3,uint,be,msb0,1,0,,Operation bits
+ControlCommand,channel,2,3,9,uint,be,msb0,1,0,,Cross-byte bit field
+ControlCommand,reserved,3,4,4,uint,be,msb0,1,0,,Reserved low nibble
+ControlCommand,target,4,0,16,int,be,msb0,0.01,0,,Signed setpoint

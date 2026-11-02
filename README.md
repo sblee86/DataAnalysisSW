@@ -1,4 +1,4 @@
-# LANscope · v0.2
+# LANscope · v0.3
 
 Windows WPF LAN 기록 작업 공간. 로그인 → ICD/IP 프로파일 → NIC 매칭 → 시험별 PCAP 기록 흐름을 제공합니다.
 
@@ -9,7 +9,7 @@ Windows WPF LAN 기록 작업 공간. 로그인 → ICD/IP 프로파일 → NIC 
 
 ## Windows 실행 및 역할
 
-실행 ZIP을 해제하고 `LanScope.exe` 실행. 단일 EXE에 .NET, 계정 바이너리, 샘플 ICD를 포함합니다. 별도 .NET 설치 없이 실행할 수 있습니다. 실제 NIC 검색/수집에는 **Npcap**이 필요합니다. Npcap 설치 옵션에 따라 관리자 권한으로 실행해야 할 수 있습니다. Npcap 설치 프로그램은 포함하지 않습니다.
+실행 ZIP을 해제하고 `LanScope.exe` 실행. 단일 EXE에 .NET, 계정 바이너리, 샘플 CSV ICD를 포함합니다. 별도 .NET 설치 없이 실행할 수 있습니다. 실제 NIC 검색/수집에는 **Npcap**이 필요합니다. Npcap 설치 옵션에 따라 관리자 권한으로 실행해야 할 수 있습니다. Npcap 설치 프로그램은 포함하지 않습니다.
 
 임시 계정은 `admin`과 `guest`이며 초기 암호는 전달 메시지에서 제공합니다.
 
@@ -40,9 +40,15 @@ Windows WPF LAN 기록 작업 공간. 로그인 → ICD/IP 프로파일 → NIC 
 
 통계는 각 매칭별 패킷 수, 바이트 합계, 최소/최대/평균 프레임 크기와 최근 수신 시각을 표시합니다. PCAP 파일 헤더 크기는 바이트 합계에 포함하지 않습니다. 같은 패킷이 여러 프로파일에 매칭되면 각 파일/통계에 중복 기록됩니다. ARP 등 IP 주소가 없는 프레임은 IP 프로파일에 매칭하지 않습니다. 고속 트래픽의 손실 없는 기록은 보장하지 않으며 Npcap 드롭 통계와 실제 부하 테스트로 확인해야 합니다. 표의 크기는 현재 버퍼의 프레임 바이트 수입니다.
 
-## ICD
+## CSV ICD / 비트 필드
 
-`samples/`에 Telemetry, ControlCommand, StatusReport의 **임의 OMG IDL 예제**를 제공합니다. 실제 IDLStudio에서 내보낸 파일이라고 주장하지 않습니다. IDLStudio 출력 원본(.idl/.xml/.icd/.json 및 기타 파일)을 최대 16 MB까지 가져와 암호화 설정과 시험 메타데이터에 함께 보관합니다. **현재 기록 필터는 송신·수신 IP 기준이며 IDL 필드/메시지 ID/포트 해석은 아직 구현하지 않았습니다.** 실제 IDLStudio 출력 샘플과 전송 직렬화 규격이 필요합니다.
+ICD 입력은 **IDLStudio에서 출력한 CSV 기반**으로 전환합니다. 통신 데이터는 **빅엔디언 고정**이며 1바이트는 변환하지 않습니다. 실제 CSV 예시가 아직 없어 현재 열 규격은 임시 어댑터입니다. 실제 IDLStudio 호환성은 예시를 받은 뒤 확인합니다.
+
+`samples/Telemetry.csv`, `ControlCommand.csv`, `StatusReport.csv`로 구조/비트 필드/교차 바이트/부호/실수/배율을 확인할 수 있습니다. 프로파일 화면에 CSV 필드 표와 메시지별 **Payload HEX 해석**을 제공합니다. raw payload 기준 0 시작 byte offset, 비트 길이 1~64, msb0/lsb0 번호 지정과 signed 부호 확장을 지원합니다. uint64 raw 값도 정밀도를 보존합니다.
+
+[CSV 열·비트 위치 규격과 예시](docs/CSV-ICD.md)를 확인하세요. 기존 IDL 설정은 삭제하지 않지만 CSV로 다시 선택해 저장해야 기록을 시작할 수 있습니다. 기존 프로파일 ID/NIC 매칭은 유지됩니다. 기존 `.idl` 샘플은 구버전 참고용이며 신규 입력은 `.csv`만 받습니다.
+
+현재 실시간 수집 매칭은 여전히 송수신 IP 기준입니다. CSV 파싱과 수동 HEX 해석은 지원하지만 **실시간 메시지 자동 판별/IDLStudio wire 형식/CDR/TCP 재조립은 지원하지 않습니다.**
 
 ## 설정과 계정 보관
 
@@ -74,7 +80,7 @@ dotnet publish src/LanScope/LanScope.csproj -c Release -r win-x64 --self-contain
 
 ## 검증과 알려진 한계
 
-Linux에서 암호 해시 인증, admin/guest 권한, IPv4/IPv6 양방향 매칭, 필수 NIC 매칭 검증, 크기 통계, 운영 코드가 작성한 PCAP을 libpcap으로 재읽기 등을 확인합니다. `tests/LanScope.Checks`는 테스트 암호를 `LANSCOPE_TEST_ADMIN` / `LANSCOPE_TEST_GUEST` 환경 변수로 받아 출력하지 않습니다. Windows에서 실행하면 추가로 DPAPI round-trip/Hidden 속성/암호화/설정 재저장을 확인합니다. Linux에서는 이 네 검사를 명시적으로 건너뜁니다.
+Linux에서 암호 해시 인증, admin/guest 권한, IPv4/IPv6 양방향 매칭, 필수 NIC 매칭 검증, 크기 통계, 운영 코드가 작성한 PCAP을 libpcap으로 재읽기 등을 확인합니다. CSV 파싱과 빅엔디언·비트 필드·64 bit 정밀도·인코딩·오류 처리 검사도 포함합니다. `tests/LanScope.Checks`는 테스트 암호를 `LANSCOPE_TEST_ADMIN` / `LANSCOPE_TEST_GUEST` 환경 변수로 받아 출력하지 않습니다. Windows에서 실행하면 추가로 DPAPI round-trip/Hidden 속성/암호화/설정 재저장을 확인합니다. Linux에서는 이 네 검사를 명시적으로 건너뜁니다.
 
 브라우저 시안에서는 로그인 오류와 역할별 메뉴, 프로파일·ICD 선택, NIC 복수 매칭, guest 시작·중지, 통계 시뮬레이션을 검증합니다. 사이트는 `design/ui-preview.html`과 동일한 `docs/index.html`을 사용합니다.
 

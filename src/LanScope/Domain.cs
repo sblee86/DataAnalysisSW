@@ -44,6 +44,8 @@ public sealed class RecordProfile
         if(!Guid.TryParseExact(Id,"N",out _)) throw new ArgumentException("프로파일 ID 형식 오류");
         if(string.IsNullOrWhiteSpace(Name) || Name.Length>80) throw new ArgumentException("프로파일 이름을 1~80자로 입력하세요.");
         if(string.IsNullOrWhiteSpace(IcdName) || IcdContent.Length==0 || IcdContent.Length>16*1024*1024) throw new ArgumentException("ICD 파일을 선택하세요. 최대 16 MB입니다.");
+        if(!IcdName.EndsWith(".csv",StringComparison.OrdinalIgnoreCase))throw new ArgumentException("ICD를 CSV 파일로 다시 선택하세요. 기존 IDL 설정 원본은 유지됩니다.");
+        IcdCsv.Parse(IcdContent);
         if(SenderIps.Count==0 || ReceiverIps.Count==0) throw new ArgumentException("송신 IP와 수신 IP를 각각 1개 이상 입력하세요.");
         if(SenderIps.Concat(ReceiverIps).Any(x=>!IPAddress.TryParse(x,out _))) throw new ArgumentException("유효한 IPv4 또는 IPv6 주소를 입력하세요. CIDR/호스트명은 지원하지 않습니다.");
     }
