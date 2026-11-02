@@ -9,6 +9,7 @@ mkdir -p docs
 cp design/ui-preview.html docs/index.html
 cp design/icd-csv.js docs/icd-csv.js
 cp design/c-struct.js docs/c-struct.js
+cp design/icd-export.js docs/icd-export.js
 touch docs/.nojekyll
 dotnet restore src/LanScope/LanScope.csproj -r win-x64 --locked-mode
 publish_dir="$(mktemp -d "$output_dir/.publish-XXXXXX")"
@@ -28,3 +29,4 @@ PY
 cp design/ui-preview.html "$output_dir/ui-preview.html"
 cp design/icd-csv.js "$output_dir/icd-csv.js"
 cp design/c-struct.js "$output_dir/c-struct.js"
+cp design/icd-export.js "$output_dir/icd-export.js"

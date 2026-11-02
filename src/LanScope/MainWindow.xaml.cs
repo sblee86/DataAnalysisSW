@@ -182,6 +182,25 @@ public partial class MainWindow : Window
     private int SelectedPack=>new[]{1,2,4,8}[Math.Max(0,StructPackBox.SelectedIndex)];
     private string SelectedBitOrder=>StructBitBox.SelectedIndex==1?"msb0":"lsb0";
     private void IcdOptionChanged(object sender,SelectionChangedEventArgs e){if(IcdText!=null&&StructBitBox!=null&&StructPackBox!=null)UpdateIcdPreview();}
+    private void ExportIcdCsvClick(object sender,RoutedEventArgs e)=>ExportIcd(false);
+    private void ExportIcdPackageClick(object sender,RoutedEventArgs e)=>ExportIcd(true);
+    private void ExportIcd(bool package)
+    {
+        if(!AdminAction())return;
+        try {
+            // Export the current editor, including selected but not yet saved definitions/options.
+            var p=new RecordProfile{IcdName=selectedIcdName,IcdContent=selectedIcd,StructSources=selectedStructs,ByteOrder=SelectedByteOrder,StructPack=SelectedPack,StructBitOrder=SelectedBitOrder,Enabled=IcdEnabledBox.IsChecked==true};
+            var bytes=package?IcdExport.Package(session!,p):IcdExport.Csv(session!,p);
+            try {
+                var d=new SaveFileDialog{Title=package?"ICD CSV / C++ 묶음 내보내기":"Excel 편집용 ICD CSV 내보내기",Filter=package?"ICD package (*.zip)|*.zip":"CSV UTF-8 (*.csv)|*.csv",DefaultExt=package?".zip":".csv",FileName=package?"icd-export.zip":"icd-edit.csv",AddExtension=true,OverwritePrompt=true};
+                if(d.ShowDialog(this)!=true)return;
+                if(!Path.GetExtension(d.FileName).Equals(package?".zip":".csv",StringComparison.OrdinalIgnoreCase))throw new ArgumentException("내보내기 확장자를 확인하세요.");
+                var temp=d.FileName+"."+Guid.NewGuid().ToString("N")+".tmp";
+                try{File.WriteAllBytes(temp,bytes);File.Move(temp,d.FileName,true);}finally{if(File.Exists(temp))File.Delete(temp);}
+                StatusText.Text="ICD 내보내기 완료 · 평문 파일: "+d.FileName;
+            }finally{System.Security.Cryptography.CryptographicOperations.ZeroMemory(bytes);}
+        }catch(Exception error){ShowError(error);}
+    }
     private void ChooseStructClick(object sender,RoutedEventArgs e){if(!AdminAction())return;var d=new OpenFileDialog{Filter="C/C++ headers|*.h;*.hpp",Multiselect=true};if(d.ShowDialog(this)!=true)return;try{if(d.FileNames.Length>128||d.FileNames.Sum(f=>new FileInfo(f).Length)>16*1024*1024)throw new ArgumentException("헤더는 128개 / 합계 16 MB 이하로 선택하세요.");var items=d.FileNames.Select(f=>new StructSource(Path.GetFileName(f),File.ReadAllBytes(f))).ToList();CStructParser.Parse(items,SelectedPack,SelectedByteOrder=="le"?"le":"be",SelectedBitOrder);selectedStructs=items;UpdateIcdPreview();}catch(Exception error){ShowError(error);}}
     private void ClearStructClick(object sender,RoutedEventArgs e){if(!AdminAction())return;selectedStructs=[];UpdateIcdPreview();}
     private void ReloadIcdClick(object sender,RoutedEventArgs e){if(!AdminAction())return;try{var loaded=store.Load(session!);settings.ClearPlaintext();settings=loaded;ReloadEditors();UpdateDashboard();NewEditor();StatusText.Text="암호화 저장소의 ICD 목록을 다시 읽었습니다.";}catch(Exception error){ShowError(error);}}

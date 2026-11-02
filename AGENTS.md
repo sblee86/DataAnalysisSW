@@ -56,3 +56,10 @@
 - Seal header names/bytes with CSV in IcdBundle; preserve legacy CSV-only fingerprint/envelopes and account resources. StructSources and raw names/content must remain JsonIgnore. Guest recipient bundle contains only authorized ICDs and is parsed internally for conversion.
 - Enabled state is signed profile metadata. Disabled ICDs do not classify/convert, but full NIC PCAP recording and mappings persist for both roles.
 - Keep design/c-struct.js copied to docs/c-struct.js and artifacts alongside icd-csv.js. Run tests/check-csv-web.cjs and tests/check-ui.cjs (Playwright, CHROMIUM_PATH optional, guest password via named test binding).
+
+## Administrator ICD export (explicitly authorized)
+
+- Admin may explicitly export plaintext ICD definitions to a chosen CSV/ZIP location. This supersedes any earlier blanket ban on exported plaintext ICDs; internal storage remains encrypted and no exports happen automatically. Guest CSV value conversion grants never grant ICD-definition/header export.
+- IcdExport.Csv/Package enforce RequireAdmin before reading/decrypting source. Export current editor or encrypted saved profile without modifying its ciphertext/plaintext state. ZIP contains normalized Excel CSV, exact original CSV/header bytes, import options and generated C++17 wire-buffer/raw accessor structs. No accounts, keys, config or PCAP.
+- Canonical CSV storage_bits/storage_bit_offset/message_size preserve struct bit storage/endian/tail padding on standalone reimport. Original header editing roundtrip uses original/source.csv plus original/headers and original options. Generated dras-wire.hpp is integration code, not restricted importer input. Never silently claim compiler-native bitfield layout equivalence.
+- Keep design/icd-export.js synced to docs/icd-export.js and delivery preview assets. Test admin/guest authorization, Excel-style edit/reimport, both endians/bit orders, header fidelity, safe ZIP paths, and generated C++ compile/read/write.

@@ -134,7 +134,7 @@ dotnet publish src/LanScope/LanScope.csproj -c Release -r win-x64 --self-contain
 
 ## 검증
 
-현재 .NET 8 핵심 검증 134개, 웹 파서 29개, Chromium UI 기능/권한/설정 검증을 통과했습니다. Windows 전용 DPAPI 검사 네 개는 Linux에서 건너뛰었습니다.
+현재 .NET 8 핵심 검증 149개, 웹 파서/내보내기 36개, Chromium UI 기능/권한/설정 검증을 통과했습니다. Windows 전용 DPAPI 검사 네 개는 Linux에서 건너뛰었습니다.
 
 `tests/LanScope.Checks`는 암호/정책/ICD 보호, 전체 프레임 기록, guest 변환 허용·거절·취소, 실제 libpcap PCAP→CSV, CSV 비트 해석 등을 확인합니다. 임시 암호는 `LANSCOPE_TEST_ADMIN` / `LANSCOPE_TEST_GUEST` 바인딩으로 받고 출력하지 않습니다. Windows에서는 DPAPI/Hidden/재저장 검사도 실행하며 Linux에서는 네 검사를 건너뜁니다.
 
@@ -150,3 +150,13 @@ CSV를 읽어 인터페이스로 **저장**하면 원본 CSV와 함께 선택한
 - **raw 값으로 쓰기**에서는 정수 필드의 raw 정수, float의 IEEE754 unsigned 비트 패턴을 입력합니다. bool은 true/false 또는 1/0, bytes는 정확한 길이의 HEX입니다.
 - 바이트 순서는 Big/Little을 선택하고 1바이트는 그대로이며 1~64비트와 바이트 경계 교차, msb0/lsb0 번호를 지원합니다. scale=0은 실제값 역변환이 불가능하므로 raw 모드만 허용합니다.
 - 이것은 버퍼/HEX 구성 및 검증 기능입니다. NIC 송신이나 원본 PCAP 덮어쓰기는 하지 않습니다.
+
+## 관리자 ICD 내보내기 / Excel 수정
+
+인터페이스 관리에 **ICD CSV 내보내기 (Excel)**와 **CSV / C++ 묶음 내보내기**를 추가했습니다. 저장된 ICD를 선택해 내보내거나 현재 가져온 정의를 저장 전에 내보낼 수 있습니다. guest는 정의/헤더를 내보낼 수 없습니다.
+
+- Excel: `icd-edit.csv`를 수정 → CSV UTF-8 저장 → DRAS에서 CSV 필드별 설정으로 가져오기 → HEX 확인 → 프로파일 저장. 전개된 CSV만으로 struct/배열/비트 필드 정보를 다시 읽으며 외부 헤더가 필요하지 않습니다.
+- C/C++: ZIP의 `original/headers/`를 수정하고 `original/source.csv`와 함께 같은 pack/endian/비트 옵션으로 가져옵니다. 원본 CSV·헤더 바이트와 가져오기 옵션을 함께 보존합니다.
+- CSV-only ICD도 ZIP의 `dras-wire.hpp`에 C++17 wire-buffer struct와 raw 필드 읽기/쓰기 메서드를 생성합니다. 생성 헤더는 C++ 연동용이며 재가져오기는 CSV 또는 원본 선언 헤더를 사용합니다. [상세 규칙](docs/CSV-ICD.md)을 확인하세요.
+
+내보낸 파일은 관리자가 선택한 위치의 평문입니다. 내부 ICD 저장소는 암호화를 유지하며 계정/키/PCAP은 내보내지 않습니다. .NET 핵심 검증 149개, 웹 파서/내보내기 36개를 통과했으며 생성된 C++17 헤더도 컴파일 후 읽기·쓰기 검증을 수행했습니다.

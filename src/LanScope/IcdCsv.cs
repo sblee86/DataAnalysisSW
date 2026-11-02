@@ -115,7 +115,7 @@ public static class IcdCsv
         ["endian"]=["endian","byteorder","엔디언"],
         ["bit_order"]=["bitorder","bitnumbering","비트순서"],
         ["scale"]=["scale","배율"], ["bias"]=["bias","valueoffset","보정값"],
-        ["unit"]=["unit","단위"], ["description"]=["description","comment","설명"], ["struct_name"]=["structname","struct","구조체"]
+        ["unit"]=["unit","단위"], ["description"]=["description","comment","설명"], ["storage_bits"]=["storagebits"], ["storage_bit_offset"]=["storagebitoffset"], ["message_size"]=["messagesize"], ["struct_name"]=["structname","struct","구조체"]
     };
     private static string Normalize(string s)=>new(s.Trim().ToLowerInvariant().Where(c=>c!='_'&&c!=' '&&c!='-').ToArray());
     public static (string Text,string Encoding) DecodeText(byte[] bytes)
@@ -160,6 +160,9 @@ public static class IcdCsv
                 int Number(string key,int fallback)=>int.TryParse(Get(key,fallback.ToString(CultureInfo.InvariantCulture)),NumberStyles.Integer,CultureInfo.InvariantCulture,out var n)?n:throw new ArgumentException(key+"는 정수여야 합니다.");
                 decimal Decimal(string key,decimal fallback)=>decimal.TryParse(Get(key,fallback.ToString(CultureInfo.InvariantCulture)),NumberStyles.Float,CultureInfo.InvariantCulture,out var n)?n:throw new ArgumentException(key+"는 숫자여야 합니다.");
                 var message=Get("message","Default");var name=Get("name");int start=Number("byte_offset",0),bit=Number("bit_offset",0),length=Number("bit_length",0);
+                int storage=Number("storage_bits",0),storageOffset=Number("storage_bit_offset",0),messageSize=Number("message_size",0);
+                if(messageSize<0||messageSize>65535)throw new ArgumentException("message_size 범위 오류");
+                if(messageSize>0){if(schema.MessageSizes.TryGetValue(message,out var previous)&&previous!=messageSize)throw new ArgumentException("동일 메시지의 message_size 불일치");schema.MessageSizes[message]=messageSize;}
                 var originalType=Get("type");var structName=Get("struct_name");if(originalType.StartsWith("struct:",StringComparison.OrdinalIgnoreCase))structName=originalType[7..].Trim();
                 var type=originalType.ToLowerInvariant();type=type switch {"unsigned" or "bitfield"=>"uint","signed"=>"int","boolean"=>"bool","float"=>"float32","double"=>"float64",_=>type};
                 var endian=(byteOrder=="csv"?Get("endian","be"):byteOrder).ToLowerInvariant();endian=endian switch {"little" or "littleendian"=>"le","big" or "bigendian" or "network"=>"be",_=>endian};
@@ -178,12 +181,15 @@ public static class IcdCsv
                 if(endian is not ("be" or "le"))throw new ArgumentException("엔디언은 be/le입니다.");
                 if(order is not ("lsb0" or "msb0"))throw new ArgumentException("bit_order는 lsb0/msb0이어야 합니다.");
                 if(type is "uint" or "int" && length>64)throw new ArgumentException("정수/비트 필드는 최대 64 bits입니다.");
-                if(type=="bool"&&(length!=1||scale!=1||bias!=0))throw new ArgumentException("bool은 1 bit, scale=1, bias=0이어야 합니다.");
+                if(storage!=0&&(storage is not (8 or 16 or 32 or 64)||storageOffset<0||length>storage||storageOffset>storage-length||bit!=storageOffset%8||type is not ("uint" or "int" or "bool")))throw new ArgumentException("storage_bits/storage_bit_offset 범위 또는 타입 오류");
+                if(storage==0&&storageOffset!=0)throw new ArgumentException("저장 단위 없는 storage_bit_offset");
+                if(type=="bool"&&((length!=1&&!(length==8&&bit==0&&storageOffset==0))||scale!=1||bias!=0))throw new ArgumentException("bool은 1 bit 또는 정렬된 C bool 8 bits, scale=1, bias=0이어야 합니다.");
                 if(type is "float32" or "float64" && (bit!=0||length!=(type=="float32"?32:64)))throw new ArgumentException("float 필드는 바이트 정렬된 32/64 bits이어야 합니다.");
                 if(type=="bytes"&&(bit!=0||length%8!=0||scale!=1||bias!=0))throw new ArgumentException("bytes는 바이트 정렬/8배수 길이, scale=1, bias=0이어야 합니다.");
-                Add(new(message,name,start,bit,length,type,endian,order,scale,bias,Get("unit"),Get("description"),row.Line));
+                Add(new(message,name,start,bit,length,type,endian,order,scale,bias,Get("unit"),Get("description"),row.Line,storage,storageOffset));
             }catch(ArgumentException e){throw new ArgumentException($"CSV {row.Line}행: {e.Message}",e);}
         }
+        foreach(var field in schema.Fields)if(schema.MessageSizes.TryGetValue(field.Message,out var size)&&size<field.EndByte)throw new ArgumentException("message_size가 필드보다 작습니다.");
         if(schema.Fields.Count==0)throw new ArgumentException("해석 가능한 이름 있는 필드가 없습니다.");
         return schema;
     }
