@@ -1,9 +1,7 @@
-# .NET 8 Windows installers
+# Windows Desktop Runtime 9.0.2 x64
 
-`dotnet/windowsdesktop-runtime-8.0.33-win-x64.exe` is the unmodified Microsoft .NET 8 Windows Desktop Runtime x64 installer. Its SHA-512 was checked against Microsoft's official release metadata. Original URL, size and digest are recorded in `dotnet/origin.json`; digest is also in `dotnet/SHA512SUMS.txt`.
+Only `dotnet/windowsdesktop-runtime-9.0.2-win-x64.exe` is included. It is the original Microsoft installer associated with SDK 9.0.200. The SHA-512 was verified against official .NET 9 release metadata; source URL and hash are in `origin.json` and `SHA512SUMS.txt`.
 
-Double-click the EXE on Windows to install. This installer has NOT been executed in the Linux cloud environment. Windows can also show its publisher through Properties → Digital Signatures.
+DRAS now targets net9.0-windows and is framework-dependent. Keep all files from the app ZIP together, install Desktop Runtime 9.0.2 or a newer 9.0.x if absent, then launch DRAS.exe. SDK 9.0.200 is needed for source builds; this runtime installer is not an SDK or a Visual Studio workload. VS2022 must be 17.12 or later. Npcap remains a separate capture prerequisite.
 
-The delivered `DRAS.exe` is self-contained, so a separate runtime installation is normally unnecessary. This installer is supplied at the user's request for other Windows runtime scenarios. It is not the SDK and does not add Visual Studio build tools.
-
-For source builds install Windows x64 **.NET SDK 8.0.427** and VS2022's .NET desktop development workload: https://dotnet.microsoft.com/download/dotnet/8.0 . Npcap is a separate prerequisite for capture/PCAP reading and is not included here.
+The previous .NET 8 installer and embedded-runtime packages were removed. The installer was hash-verified, not executed on Linux.

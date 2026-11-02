@@ -88,6 +88,7 @@ public sealed class NicBinding
 }
 public sealed class WorkspaceSettings
 {
+    public string AdminCredentialDigest {get;set;}="";
     public string OutputDirectory { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),"LANscope","Records");
     public List<RecordProfile> Profiles { get; set; } = [];
     public List<NicBinding> Bindings { get; set; } = [];

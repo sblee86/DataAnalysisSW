@@ -1,6 +1,6 @@
 # Project workflow — current DRAS contract
 
-- Primary app: Windows WPF, C# 12/.NET 8 (SDK 8.0.427, net8.0-windows). Use the existing checkout; no worktrees unless requested. Preserve unrelated user changes.
+- Primary app: Windows WPF, C# 12/ .NET 9 (SDK 9.0.200, net9.0-windows). Use the existing checkout; no worktrees unless requested. Preserve unrelated user changes.
 - Every delivered revision includes GitHub links to the Windows x64 build ZIP, full repository ZIP (with offline NuGet), and rendered GitHub Pages UI. Internal /workspace download links do not work for this user.
 - Windows cross-build uses EnableWindowsTargeting; run actual WPF/DPAPI/Npcap validation on Windows. Never call a Linux build Windows runtime verification.
 - Keep design/ui-preview.html and design/icd-csv.js synced to docs/index.html and docs/icd-csv.js with scripts/package.sh. Pages uses main /docs. Web is PUBLIC DEMO ONLY; login admin/admin is explicitly requested for UI review. Windows credentials and vault keys remain separate.
@@ -32,9 +32,9 @@
 
 ## VS2022 compatibility
 
-- User requires VS2022-compatible sources. Keep app on net8.0-windows and checks on net8.0 with C# 12; do not reintroduce .NET 10 or .slnx. Root DRAS.sln opens in VS2022 supporting .NET 8 (17.8 family, latest patches; SDK minimum MSBuild 17.8.3).
-- Global SDK 8.0.427 and offline Windows runtime/reference packs 8.0.33 are matched. Current feed has 11 original packages including transitive dependencies. Use SDK 8 for all validation, Debug solution build and Windows self-contained publish.
-- Preserve account, policy and guest recipient keys during framework migration. Verify existing encrypted resources/public keys with .NET 8 checks before delivery. Windows executable is self-contained and does not require the SDK for running.
+- User requires VS2022-compatible sources. Keep app on net9.0-windows and checks on net9.0 with C# 12; do not reintroduce .NET 10 or .slnx. Root DRAS.sln opens in VS2022 supporting  .NET 9 (17.12 family, latest patches; SDK minimum MSBuild 17.12.0).
+- Global SDK 9.0.200 and offline Windows runtime/reference packs 9.0.2 are matched. Current feed has 7 original packages including transitive dependencies. Use SDK 9 for all validation, Debug solution build and Windows framework-dependent publish.
+- Preserve account, policy and guest recipient keys during framework migration. Verify existing encrypted resources/public keys with  .NET 9 checks before delivery. Windows app is framework-dependent, needs Desktop Runtime9.0.2+, and all app ZIP files must stay together. No SDK is needed just for running.
 
 ## DRAS branding and UI
 
@@ -46,7 +46,7 @@
 
 ## Runtime installer and bit write support
 
-- User requested the .NET runtime installer. Include the unmodified official Windows Desktop Runtime 8.0.33 win-x64 EXE under installers/dotnet with verified Microsoft SHA-512, source metadata and clear SDK-vs-runtime instructions. The single app EXE remains self-contained.
+- User requested the .NET runtime installer. Include the unmodified official Windows Desktop Runtime 9.0.2 win-x64 EXE under installers/dotnet with verified Microsoft SHA-512, source metadata and clear SDK-vs-runtime instructions. Do not bundle the runtime inside the app; the official installer is the only runtime install artifact.
 - CSV interface import/save is admin-only and seals raw definitions in the encrypted internal store. Never introduce plaintext exported ICD config near the executable.
 - Bit fields support BOTH reading and writing. WriteValue/Encode preserve all bits outside the selected field, including cross-byte msb0/lsb0 ranges. Default writes inverse-scale engineering values; raw mode uses raw integers and IEEE754 unsigned bit patterns for floats. Range/length errors must not partially mutate caller data. This is payload buffer construction, not live transmission.
 
@@ -68,3 +68,11 @@
 
 - User clarified C++ export means ordinary `struct Name { uint16_t member; uint8_t flag : 3; float value; };`, not only a wire-buffer/helper API. IcdExport.Struct enforces admin and exports icd-struct.hpp directly; ZIP also includes it. Native ABI is not the exact ICD wire layout. Preserve wire metadata in comments/CSV; do not claim generated declarations serialize network endian automatically.
 - Five independently collapsible WPF Expanders / web details sections: import, export, fields, HEX, endpoints/permissions. Import/endpoints open initially; samples are a subordinate fold. Export is one format selector (CSV/C++/ZIP) and one button; default C++ struct. Folding must retain inputs and role locks.
+
+## Current SDK9 and tab UI contract supersedes old folding/self-contained notes
+
+- User has SDK9.0.200; global.json selects it. App/checks target net9; runtime9.0.2 maps to that SDK. VS2022 minimum17.12. Package framework-dependent EXE+DLL/deps/runtimeconfig; not a single EXE. Keep only seven required original offline packages and one Desktop Runtime9.0.2 installer; no old8 runtime packs/installers.
+- Settings title is simply 설정, with 글자 크기 / 배치·입력란 / 계정·보안 tabs. Independent TestNameFont/Width/Height persist in DRAS-UI-3, migrate old UI preferences. Trial input is on an auto-height panel with resize thumb and visible padding, folder-change button admin-only and blocked during capture.
+- ICD uses Current/Import/Export/HEX tabs, first current ICD; import splits sources and parse options into cards. Retain fields while switching tabs. All buttons have tooltips explaining purpose and material impact.
+- AdminCredentials wraps the EXISTING root key under the new password, verifies current password and pins its signature to old public key. Signed workspace AdminCredentialDigest commits active envelope; hash-named pending allows crash recovery. Missing/corrupt active envelope must never fall back to embedded password. Root key and existing encrypted ICDs/public resource pins remain unchanged. This changes app login, not OS controls or retroactive revocation of leaked keys. Back up workspace and credentials together.
+- Public web password changes last only this page session; reload resets admin/admin. Actual credential changes are WPF-only persisted encrypted envelopes.

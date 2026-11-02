@@ -11,10 +11,19 @@ cp design/icd-csv.js docs/icd-csv.js
 cp design/c-struct.js docs/c-struct.js
 cp design/icd-export.js docs/icd-export.js
 touch docs/.nojekyll
-dotnet restore src/LanScope/LanScope.csproj -r win-x64 --locked-mode
+dotnet restore src/LanScope/LanScope.csproj --locked-mode
 publish_dir="$(mktemp -d "$output_dir/.publish-XXXXXX")"
 trap 'rm -rf "$publish_dir"' EXIT
-dotnet publish src/LanScope/LanScope.csproj -c Release -r win-x64 --self-contained true --no-restore -o "$publish_dir"
+dotnet publish src/LanScope/LanScope.csproj -c Release -r win-x64 --self-contained false --no-restore -o "$publish_dir"
+cat > "$publish_dir/READ-ME.txt" <<'INFO'
+DRAS - .NET 9 Windows x64
+Keep all extracted files together, then run DRAS.exe.
+Requires Windows Desktop Runtime 9.0.2 or a newer 9.0.x and Npcap for NIC capture.
+The full repository ZIP includes only the official Desktop Runtime 9.0.2 installer:
+installers/dotnet/windowsdesktop-runtime-9.0.2-win-x64.exe
+Source builds use SDK9.0.200 and VS2022 17.12+.
+https://github.com/sblee86/DataAnalysisSW
+INFO
 python3 - "$repo_dir" "$output_dir" "$publish_dir" <<'PY'
 import sys,zipfile,pathlib
 repo,out,publish=map(pathlib.Path,sys.argv[1:])

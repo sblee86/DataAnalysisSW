@@ -1,33 +1,13 @@
 [
   {
-    "file": "microsoft.aspnetcore.app.runtime.win-x64.8.0.33.nupkg",
-    "bytes": 12188707,
-    "sha256": "8429d2eefd18f93578d45b32faad12d112f9f197b190ab4de4c1561171a83750"
+    "file": "microsoft.netcore.app.host.win-x64.9.0.2.nupkg",
+    "bytes": 6914115,
+    "sha256": "7b3bb1f2dca064f54446aec2fed8a351f4f315c707da9b7c72840d98218f2ff0"
   },
   {
-    "file": "microsoft.net.illink.tasks.8.0.33.nupkg",
-    "bytes": 1442636,
-    "sha256": "3f0e6c6401123bbf85f71e8e9dbd0a5fbe770b8766ddab78533f689f7d27d90c"
-  },
-  {
-    "file": "microsoft.netcore.app.host.win-x64.8.0.33.nupkg",
-    "bytes": 5478860,
-    "sha256": "427c42a3955b5756cb79d0aacaf9b5936a3daab51976255bed621e697b4c3251"
-  },
-  {
-    "file": "microsoft.netcore.app.runtime.win-x64.8.0.33.nupkg",
-    "bytes": 36218190,
-    "sha256": "82b2c1ad62b334ba0de2e7c2d957d9bc8045fd1b643a9b119087d4a0a02f5e1c"
-  },
-  {
-    "file": "microsoft.windowsdesktop.app.ref.8.0.33.nupkg",
-    "bytes": 4447630,
-    "sha256": "71cd0596f09209bf15551074078d95d4562ae86ad8a63587f4f1ec07353d3881"
-  },
-  {
-    "file": "microsoft.windowsdesktop.app.runtime.win-x64.8.0.33.nupkg",
-    "bytes": 36842107,
-    "sha256": "e496f8b363ad364aa59075973c587b56c7c5ae54a9a86a8e06462c3891405a2d"
+    "file": "microsoft.windowsdesktop.app.ref.9.0.2.nupkg",
+    "bytes": 5131885,
+    "sha256": "28d4a231f1cf2b48bb66dbcf1ca15ccc6467da1495d4dd16e0280b91a83331e9"
   },
   {
     "file": "packetdotnet.1.4.8.nupkg",

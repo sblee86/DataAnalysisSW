@@ -279,4 +279,22 @@ var sampleDeclarations=Encoding.UTF8.GetString(IcdExport.Struct(admin!,new Recor
 if(!string.IsNullOrEmpty(declarationDirectory))File.WriteAllText(Path.Combine(declarationDirectory,"telemetry-struct.hpp"),sampleDeclarations);
 var arrayDeclarations=Encoding.UTF8.GetString(IcdExport.Struct(admin!,new RecordProfile{IcdContent=Encoding.UTF8.GetBytes("name,byte_offset,bit_length,type\nclass,0,8,uint\nicd_class,1,8,uint\nblob,2,32,bytes")}));Check(arrayDeclarations.Contains("uint8_t icd_class;")&&arrayDeclarations.Contains("uint8_t icd_class_2;")&&arrayDeclarations.Contains("uint8_t blob[4];"),"C++ identifiers handle keywords/collisions and byte arrays");
 if(!string.IsNullOrEmpty(declarationDirectory))File.WriteAllText(Path.Combine(declarationDirectory,"array-struct.hpp"),arrayDeclarations);
+var credentialDir=Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString("N"));Directory.CreateDirectory(credentialDir);
+try {
+ string credentialBinding="",credentialPath=Path.Combine(credentialDir,"admin-login.bin"),oldPassword=Environment.GetEnvironmentVariable("LANSCOPE_TEST_ADMIN")!,newPassword="Changed-"+Guid.NewGuid().ToString("N");
+ var credentials=new AdminCredentials(File.ReadAllBytes(Path.Combine(root,"src/LanScope/Resources/accounts.bin")),IcdProtection.PublicKey(admin!),()=>credentialBinding,credentialPath);
+ using(var initial=credentials.Login("admin",oldPassword))Check(initial?.Role==UserRole.Admin,"embedded admin authentication before password change");
+ Denied(()=>credentials.Change(guest!,oldPassword,newPassword,_=>{}),"guest cannot change admin password");
+ Denied(()=>credentials.Change(admin!,"wrong",newPassword,_=>{}),"current password required for admin password change");
+ Throws(()=>credentials.Change(admin!,oldPassword,"short",_=>{}),"new password minimum length checked");
+ credentials.Change(admin!,oldPassword,newPassword,d=>credentialBinding=d);Check(credentialBinding.Length==64&&File.Exists(credentialPath),"password envelope and signed-config binding prepared atomically");
+ Check(credentials.Login("admin",oldPassword)==null,"old admin password rejected after change");
+ using(var changed=credentials.Login("admin",newPassword)){Check(changed?.Role==UserRole.Admin&&IcdProtection.PublicKey(changed!).SequenceEqual(IcdProtection.PublicKey(admin!)),"new password restores original signing and ICD root key");var testProfile=new RecordProfile{Id=exportProfile.Id,IcdId=exportProfile.IcdId,EncryptedIcd=exportProfile.EncryptedIcd};try{IcdProtection.Open(changed!,testProfile);Check(testProfile.IcdContent.SequenceEqual(structCsv),"existing encrypted ICD opens with changed password");}finally{testProfile.ClearPlaintext();}}
+ Check(!Encoding.UTF8.GetString(File.ReadAllBytes(credentialPath)).Contains(newPassword),"plaintext password is never written to credential envelope");
+ using(var guestAfter=credentials.Login("guest",Environment.GetEnvironmentVariable("LANSCOPE_TEST_GUEST")!))Check(guestAfter?.Role==UserRole.Guest,"guest authentication unchanged by admin password update");
+ try{credentials.Change(admin!,newPassword,"Next-"+Guid.NewGuid().ToString("N"),_=>throw new IOException("simulated config save failure"));throw new Exception("save failure expected");}catch(IOException){using var stillValid=credentials.Login("admin",newPassword);Check(stillValid?.Role==UserRole.Admin,"failed configuration commit preserves previous admin login");}
+ var savedCredential=File.ReadAllBytes(credentialPath);File.Delete(credentialPath);CryptoRejected(()=>credentials.Login("admin",oldPassword),"deleted override cannot fall back to old embedded password");File.WriteAllBytes(credentialPath,savedCredential);
+ savedCredential[^1]^=1;File.WriteAllBytes(credentialPath,savedCredential);CryptoRejected(()=>credentials.Login("admin",newPassword),"tampered password envelope rejected");
+}finally{Directory.Delete(credentialDir,true);}
+var newLayoutPath=Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString("N"),"ui.bin");try{var prefs=new UiPreferences(newLayoutPath);var customized=new UiLayoutOptions(TestNameFont:28,TestNameWidth:740,TestNameHeight:120);prefs.SaveLayout(customized);Check(prefs.LoadLayout()==customized,"record name font and resize settings roundtrip");}finally{Directory.Delete(Path.GetDirectoryName(newLayoutPath)!,true);}
 Console.WriteLine($"{checks} meaningful checks passed. Windows DPAPI/WPF/live NIC tests remain Windows-only.");

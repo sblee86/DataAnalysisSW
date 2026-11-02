@@ -1,8 +1,6 @@
 {
-  "product": ".NET Windows Desktop Runtime",
-  "version": "8.0.33",
-  "architecture": "win-x64",
-  "source": "https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/8.0.33/windowsdesktop-runtime-8.0.33-win-x64.exe",
-  "sha512": "b622106783dee5e1ce993ec849ecd43fa147c6230daecf910348f6adcd28f63abf39cf6db832a6a2684941c19a9321816e9cbc9dbe8c4a8bb2d7e46487ab3890",
-  "bytes": 58398672
+  "version": "9.0.2",
+  "url": "https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/9.0.2/windowsdesktop-runtime-9.0.2-win-x64.exe",
+  "sha512": "60958279f9ff96cc953ed6cf404d8deb68e554374d08dc31e8b62a226ea67ae13d6c9eaf1fb44f783fa6241862e83d1cb8c21bbbadfc9386200fbb0345714be9",
+  "sdk": "9.0.200"
 }

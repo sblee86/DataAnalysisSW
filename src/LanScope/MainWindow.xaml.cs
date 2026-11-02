@@ -27,7 +27,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();ApplyUiLayout(uiPreferences.LoadLayout(),false);UpdateNavColors("dashboard");SampleBox.ItemsSource=sampleNames;SampleBox.SelectedIndex=0;
-        timer.Tick+=(_,_)=>Tick();UserIdBox.Focus();
+        timer.Tick+=(_,_)=>Tick();DashboardView.SizeChanged+=(_,_)=>FitTestName();UserIdBox.Focus();
     }
     private readonly UiPreferences uiPreferences=new();
     private void UpdateNavColors(string page)
@@ -50,9 +50,21 @@ public partial class MainWindow : Window
         Resources["MenuFontSize"]=(double)value.Menu;Resources["TableFontSize"]=(double)value.Table;Resources["TableHeaderFontSize"]=(double)value.TableHeader;
         Resources["UiSidebar"]=new GridLength(216*Math.Max(1,value.Menu/13.0));
         ProfileColumn.Width=new GridLength(value.ProfileWidth);NicLeftColumn.Width=new GridLength(value.NicPercent,GridUnitType.Star);NicRightColumn.Width=new GridLength(100-value.NicPercent,GridUnitType.Star);
+        TestNameBox.FontSize=value.TestNameFont;TestNameFrame.Width=value.TestNameWidth;TestNameFrame.MinHeight=Math.Max(56,value.TestNameFont*1.5+24);TestNameFrame.Height=Math.Max(value.TestNameHeight,TestNameFrame.MinHeight);
         if(persist)try{uiPreferences.SaveLayout(value);}catch(Exception e) when(e is IOException or UnauthorizedAccessException){StatusText.Text="화면 설정 저장 실패: "+e.Message;}
     }
-    private void ScreenSettingsClick(object sender,RoutedEventArgs e){if(displaySettings!=null){displaySettings.Activate();return;}displaySettings=new DisplaySettingsWindow(uiLayout,v=>ApplyUiLayout(v,true)){Owner=this};displaySettings.Closed+=(_,_)=>displaySettings=null;displaySettings.Show();}
+    private void ScreenSettingsClick(object sender,RoutedEventArgs e){if(displaySettings!=null){displaySettings.Activate();return;}displaySettings=new DisplaySettingsWindow(uiLayout,v=>ApplyUiLayout(v,true),session?.Role==UserRole.Admin,ChangeAdminPassword){Owner=this};displaySettings.Closed+=(_,_)=>displaySettings=null;displaySettings.Show();}
+    private AdminCredentials Credentials()=>new(Resource("accounts.bin"),Resource("policy-public.bin"),store.ReadCredentialDigest);
+    private void ChangeAdminPassword(string current,string next)
+    {
+        if(!AdminAction())throw new InvalidOperationException("현재는 비밀번호를 변경할 수 없습니다.");
+        Credentials().Change(session!,current,next,digest=>{var previous=settings.AdminCredentialDigest;settings.AdminCredentialDigest=digest;try{store.Save(session!,settings);}catch{settings.AdminCredentialDigest=previous;throw;}});
+        StatusText.Text="관리자 비밀번호 변경 완료 · 기존 ICD와 암호화 키 유지";
+    }
+    private void FitTestName(){if(DashboardView.ActualWidth>0)TestNameFrame.MaxWidth=Math.Clamp(DashboardView.ActualWidth-40,240,900);}
+    private void TestNameResize(object sender,System.Windows.Controls.Primitives.DragDeltaEventArgs e){TestNameFrame.Width=Math.Clamp(TestNameFrame.ActualWidth+e.HorizontalChange,240,900);TestNameFrame.Height=Math.Clamp(TestNameFrame.ActualHeight+e.VerticalChange,TestNameFrame.MinHeight,180);}
+    private void TestNameResizeDone(object sender,System.Windows.Controls.Primitives.DragCompletedEventArgs e){displaySettings?.Close();ApplyUiLayout(uiLayout with{TestNameWidth=(int)TestNameFrame.Width,TestNameHeight=(int)TestNameFrame.Height},true);}
+    private void RecordFolderClick(object sender,RoutedEventArgs e){if(!AdminAction())return;var d=new OpenFolderDialog{Title="새 시험 기록 폴더 선택",InitialDirectory=Directory.Exists(settings.OutputDirectory)?settings.OutputDirectory:""};if(d.ShowDialog(this)==true)SaveChange(next=>{Directory.CreateDirectory(d.FolderName);next.OutputDirectory=d.FolderName;});}
     private void PaneResized(object sender,System.Windows.Controls.Primitives.DragCompletedEventArgs e){displaySettings?.Close();ApplyUiLayout(uiLayout with{ProfileWidth=Math.Clamp((int)ProfileColumn.ActualWidth,180,500),NicPercent=Math.Clamp((int)(100*NicLeftColumn.ActualWidth/Math.Max(1,NicLeftColumn.ActualWidth+NicRightColumn.ActualWidth)),30,75)},true);}
     private static T? Ancestor<T>(DependencyObject? node) where T:DependencyObject
     {
@@ -90,10 +102,10 @@ public partial class MainWindow : Window
         busy=true;LoginButton.IsEnabled=false;LoginError.Text="";
         LoginSession? candidate=null;var id=UserIdBox.Text;var password=PasswordInput.Password;PasswordInput.Clear();
         try {
-            var result=await Task.Run(()=>new AccountService(Resource("accounts.bin")).Login(id,password));
+            var result=await Task.Run(()=>Credentials().Login(id,password));
             candidate=result;password="";
             if(result==null){failedLogins++;if(failedLogins>=5){blockedUntil=DateTime.UtcNow.AddSeconds(30);failedLogins=0;}LoginError.Text="ID 또는 암호가 올바르지 않습니다.";return;}
-            settings.ClearPlaintext();settings=store.Load(result);engine.ClearHistory();session=result;candidate=null;failedLogins=0;
+            displaySettings?.Close();settings.ClearPlaintext();settings=store.Load(result);engine.ClearHistory();session=result;candidate=null;failedLogins=0;
             if(!File.Exists(store.FilePath)&&session.Role==UserRole.Admin) {
                 using var reader=new BinaryReader(new MemoryStream(Resource("samples.bin")));
                 int count=reader.ReadInt32();for(int i=0;i<count;i++) {
@@ -129,6 +141,7 @@ public partial class MainWindow : Window
         ConversionView.Visibility=name=="conversion"?Visibility.Visible:Visibility.Collapsed;
         ProfilesView.Visibility=name=="profiles"?Visibility.Visible:Visibility.Collapsed;
         SettingsView.Visibility=name=="settings"?Visibility.Visible:Visibility.Collapsed;
+        if(name=="profiles"&&editingProfileId==null&&selectedIcd.Length==0&&ProfileNameBox.Text.Length==0&&settings.Profiles.Count>0)ProfilesList.SelectedIndex=0;
         UpdateNavColors(name);
         PageTitle.Text=name=="conversion"?"PCAP → CSV 변환":name=="profiles"?"인터페이스 관리":name=="settings"?"기록 설정":"기록 대시보드";
     }
@@ -140,7 +153,7 @@ public partial class MainWindow : Window
     private void ProfileSelected(object sender,SelectionChangedEventArgs e)
     {
         if(ProfilesList.SelectedItem is not RecordProfile p)return;
-        editingProfileId=p.Id;ProfileNameBox.Text=p.Name;SenderBox.Text=string.Join(", ",p.SenderIps);ReceiverBox.Text=string.Join(", ",p.ReceiverIps);selectedIcd=p.IcdContent;selectedIcdName=p.IcdName;selectedStructs=p.StructSources.Select(x=>new StructSource(x.Name,[..x.Content])).ToList();ByteOrderBox.SelectedIndex=p.ByteOrder=="be"?1:p.ByteOrder=="le"?2:0;StructPackBox.SelectedIndex=Array.IndexOf(new[]{1,2,4,8},p.StructPack);StructBitBox.SelectedIndex=p.StructBitOrder=="msb0"?1:0;IcdEnabledBox.IsChecked=p.Enabled;BothDirectionsBox.IsChecked=p.BothDirections;GuestIcdAllowedBox.IsChecked=settings.GuestIcdAllowList.Contains(p.IcdId);UpdateIcdPreview();
+        IcdTabs.SelectedIndex=0;editingProfileId=p.Id;ProfileNameBox.Text=p.Name;SenderBox.Text=string.Join(", ",p.SenderIps);ReceiverBox.Text=string.Join(", ",p.ReceiverIps);selectedIcd=p.IcdContent;selectedIcdName=p.IcdName;selectedStructs=p.StructSources.Select(x=>new StructSource(x.Name,[..x.Content])).ToList();ByteOrderBox.SelectedIndex=p.ByteOrder=="be"?1:p.ByteOrder=="le"?2:0;StructPackBox.SelectedIndex=Array.IndexOf(new[]{1,2,4,8},p.StructPack);StructBitBox.SelectedIndex=p.StructBitOrder=="msb0"?1:0;IcdEnabledBox.IsChecked=p.Enabled;BothDirectionsBox.IsChecked=p.BothDirections;GuestIcdAllowedBox.IsChecked=settings.GuestIcdAllowList.Contains(p.IcdId);UpdateIcdPreview();
     }
     private IcdSchema? currentSchema;
     private void UpdateIcdPreview()
@@ -314,7 +327,7 @@ public partial class MainWindow : Window
     {
         bool active=engine.IsRunning;
         StartButton.IsEnabled=session!=null&&!active&&!busy&&settings.Bindings.Count>0;
-        StopButton.IsEnabled=active&&!busy;TestNameBox.IsEnabled=!active&&!busy;
+        StopButton.IsEnabled=active&&!busy;TestNameBox.IsEnabled=!active&&!busy;RecordFolderButton.IsEnabled=session?.Role==UserRole.Admin&&!active&&!busy;
         ProfileNav.IsEnabled=SettingsNav.IsEnabled=ConvertNav.IsEnabled=!active&&!busy;
         RunBadge.Text=active?"● 기록 중":busy?"● 처리 중":"● 대기 중";
     }
@@ -341,7 +354,7 @@ public partial class MainWindow : Window
     {
         if(busy)return;
         if(engine.IsRunning){if(MessageBox.Show(this,"기록을 중지하고 로그아웃할까요?","로그아웃",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;await StopRecording();}
-        timer.Stop();settings.ClearPlaintext();NewEditor();ConversionProfileBox.ItemsSource=null;ConversionMessageBox.ItemsSource=null;ConversionAccessText.Text="";ConversionResultText.Text="";ProfilesList.ItemsSource=null;BindingProfiles.ItemsSource=null;session?.Dispose();session=null;WorkspaceView.Visibility=Visibility.Collapsed;LoginView.Visibility=Visibility.Visible;UserIdBox.Clear();PasswordInput.Clear();LoginError.Text="";UserIdBox.Focus();
+        displaySettings?.Close();timer.Stop();settings.ClearPlaintext();NewEditor();ConversionProfileBox.ItemsSource=null;ConversionMessageBox.ItemsSource=null;ConversionAccessText.Text="";ConversionResultText.Text="";ProfilesList.ItemsSource=null;BindingProfiles.ItemsSource=null;session?.Dispose();session=null;WorkspaceView.Visibility=Visibility.Collapsed;LoginView.Visibility=Visibility.Visible;UserIdBox.Clear();PasswordInput.Clear();LoginError.Text="";UserIdBox.Focus();
     }
     private void WindowClosing(object? sender,CancelEventArgs e)
     {
