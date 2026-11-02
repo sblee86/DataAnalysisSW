@@ -10,3 +10,5 @@
 - User needs accessible GitHub links; internal /workspace file links did not work. When authorized to publish a delivery, upload artifacts to GitHub and verify remote files, then provide GitHub download links. Exclude downloads/ from packaged source ZIP to avoid recursive archives.
 
 - UI review must open as a website via GitHub Pages at https://sblee86.github.io/DataAnalysisSW/ . Keep docs/index.html byte-identical to design/ui-preview.html and publish docs/ on main. Do not substitute a GitHub source-view link for a rendered preview. Distinguish uploaded Pages source from verified live publication.
+- Include all required NuGet .nupkg files in nuget-offline/ (including Windows host, reference and self-contained runtime packs) with a SHA-256 manifest. Preserve original package signatures. Verify restore with an empty package cache and only the local feed. Windows users build via scripts/build-offline.ps1 after installing the pinned SDK.
+- Full repository ZIP from GitHub includes the offline NuGet feed. downloads/LANscope-source.zip is code-only to stay within GitHub's per-file limit; label it accordingly.

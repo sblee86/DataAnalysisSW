@@ -18,7 +18,7 @@ def pack(root,target,skip):
   for p in sorted(root.rglob('*')):
    rel=p.relative_to(root)
    if p.is_file() and not any(x in skip for x in rel.parts): z.write(p,rel)
-pack(repo,out/'LANscope-source.zip',{'.git','bin','obj','.vs','artifacts','downloads'})
+pack(repo,out/'LANscope-source.zip',{'.git','bin','obj','.vs','artifacts','downloads','.nuget','nuget-offline'})
 pack(out/'windows-x64',out/'LANscope-win-x64.zip',set())
 PY
 cp design/ui-preview.html "$output_dir/ui-preview.html"
