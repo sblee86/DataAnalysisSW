@@ -13,6 +13,7 @@ public static class PcapCsvConverter
     private static RecordProfile Authorize(LoginSession session,WorkspaceSettings settings,string profileId)
     {
         _=session.SessionKey;var profile=settings.Profiles.SingleOrDefault(p=>p.Id==profileId)??throw new ArgumentException("인터페이스를 선택하세요.");
+        if(!profile.Enabled)throw new UnauthorizedAccessException("비활성 ICD는 CSV로 변환할 수 없습니다. PCAP 기록은 가능합니다.");
         if(session.Role==UserRole.Guest) {
             if(!settings.GuestIcdAllowList.Contains(profile.IcdId))throw new UnauthorizedAccessException("이 인터페이스의 CSV 변환 권한이 없습니다. PCAP 기록은 가능합니다.");
             if(settings.HasGuestConversionConflict(profileId))throw new UnauthorizedAccessException("동일 IP의 제한 ICD를 구별할 수 없어 CSV 변환을 차단합니다. PCAP 기록은 가능합니다.");
@@ -22,9 +23,12 @@ public static class PcapCsvConverter
     }
     private static IcdSchema Schema(LoginSession session,RecordProfile profile)
     {
-        if(session.Role==UserRole.Guest){var bytes=GuestIcdAccess.Open(session,profile);try{return IcdCsv.Parse(bytes);}finally{CryptographicOperations.ZeroMemory(bytes);}}
-        session.RequireAdmin();var temporary=new RecordProfile{Id=profile.Id,IcdId=profile.IcdId,EncryptedIcd=profile.EncryptedIcd};
-        try{IcdProtection.Open(session,temporary);return IcdCsv.Parse(temporary.IcdContent);}finally{temporary.ClearPlaintext();}
+        var temporary=new RecordProfile{Id=profile.Id,IcdId=profile.IcdId,EncryptedIcd=profile.EncryptedIcd,ByteOrder=profile.ByteOrder,StructPack=profile.StructPack,StructBitOrder=profile.StructBitOrder};
+        try {
+            if(session.Role==UserRole.Guest){var bytes=GuestIcdAccess.Open(session,profile);try{IcdBundle.Unpack(bytes,temporary);}finally{CryptographicOperations.ZeroMemory(bytes);}}
+            else IcdProtection.Open(session,temporary);
+            return temporary.ParseSchema();
+        }finally{temporary.ClearPlaintext();}
     }
     public static string[] Messages(LoginSession session,WorkspaceSettings settings,string profileId)=>Schema(session,Authorize(session,settings,profileId)).Messages;
     public static CsvConversionResult Convert(LoginSession session,WorkspaceSettings settings,string profileId,string message,string input,string output,CancellationToken cancellation=default)

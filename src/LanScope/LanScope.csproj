@@ -1,10 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <AssemblyName>SAAM_DAS</AssemblyName>
+    <AssemblyName>DRAS</AssemblyName>
     <RootNamespace>LanScope</RootNamespace>
-    <Product>SAAM_DAS (Data analysis software)</Product>
-    <Title>SAAM_DAS</Title>
+    <Product>DRAS (Data Recording &amp; analysis software)</Product>
+    <Title>DRAS</Title>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>

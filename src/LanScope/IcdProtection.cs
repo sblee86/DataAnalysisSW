@@ -27,20 +27,22 @@ public static class IcdProtection
         if(!Guid.TryParseExact(profile.Id,"N",out _))throw new ArgumentException("프로파일 ID 오류");
         if(profile.IcdContent.Length==0) {Open(admin,profile);}
         if(profile.IcdContent.Length==0||profile.IcdContent.Length>16*1024*1024||string.IsNullOrWhiteSpace(profile.IcdName))throw new ArgumentException("ICD 파일 크기/이름 오류");
-        profile.IcdId=Convert.ToHexString(SHA256.HashData(profile.IcdContent));
+        profile.IcdId=IcdBundle.Fingerprint(profile);
+        var payload=IcdBundle.Pack(profile);
         using var output=new MemoryStream();
-        using(var w=new BinaryWriter(output,Encoding.UTF8,true)){w.Write(profile.IcdName);w.Write(profile.IcdContent.Length);w.Write(profile.IcdContent);}
-        var bytes=output.ToArray();try{profile.EncryptedIcd=Encrypt(admin,"profile:"+profile.Id,bytes);}finally{CryptographicOperations.ZeroMemory(bytes);if(output.TryGetBuffer(out var buffer))CryptographicOperations.ZeroMemory(buffer.AsSpan());}
+        using(var w=new BinaryWriter(output,Encoding.UTF8,true)){w.Write(profile.IcdName);w.Write(payload.Length);w.Write(payload);}
+        var bytes=output.ToArray();try{profile.EncryptedIcd=Encrypt(admin,"profile:"+profile.Id,bytes);}finally{CryptographicOperations.ZeroMemory(payload);CryptographicOperations.ZeroMemory(bytes);if(output.TryGetBuffer(out var buffer))CryptographicOperations.ZeroMemory(buffer.AsSpan());}
     }
     public static void Open(LoginSession admin,RecordProfile profile)
     {
         var bytes=Decrypt(admin,"profile:"+profile.Id,profile.EncryptedIcd);
         try {
             using var reader=new BinaryReader(new MemoryStream(bytes),Encoding.UTF8);
-            var name=reader.ReadString();int length=reader.ReadInt32();if(length<1||length>16*1024*1024||reader.BaseStream.Length-reader.BaseStream.Position!=length)throw new CryptographicException("ICD 길이 오류");
+            var name=reader.ReadString();int length=reader.ReadInt32();if(length<1||length>33*1024*1024||reader.BaseStream.Length-reader.BaseStream.Position!=length)throw new CryptographicException("ICD 길이 오류");
             var content=reader.ReadBytes(length);
-            if(Convert.ToHexString(SHA256.HashData(content))!=profile.IcdId){CryptographicOperations.ZeroMemory(content);throw new CryptographicException("ICD 지문 오류");}
-            profile.IcdName=name;profile.IcdContent=content;
+            IcdBundle.Unpack(content,profile);CryptographicOperations.ZeroMemory(content);
+            if(IcdBundle.Fingerprint(profile)!=profile.IcdId){CryptographicOperations.ZeroMemory(content);throw new CryptographicException("ICD 지문 오류");}
+            profile.IcdName=name;
         }finally{CryptographicOperations.ZeroMemory(bytes);}
     }
     public static WorkspaceSettings CloneForAdmin(LoginSession admin,WorkspaceSettings settings)

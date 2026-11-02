@@ -22,11 +22,11 @@ public partial class MainWindow : Window
     private List<NicInfo> nics=[]; private List<LibPcapLiveDevice> devices=[];
     private bool busy; private int failedLogins;private DateTime blockedUntil;
     private DateTime startedAt;private TimeSpan elapsed;
-    private string? editingProfileId;private byte[] selectedIcd=[];private string selectedIcdName="";
+    private string? editingProfileId;private byte[] selectedIcd=[];private string selectedIcdName="";private List<StructSource> selectedStructs=[];
     private readonly string[] sampleNames=["샘플 A","샘플 B","샘플 C"];
     public MainWindow()
     {
-        InitializeComponent();ApplyFontSize(uiPreferences.LoadFontSize(),false);UpdateNavColors("dashboard");SampleBox.ItemsSource=sampleNames;SampleBox.SelectedIndex=0;
+        InitializeComponent();ApplyUiLayout(uiPreferences.LoadLayout(),false);UpdateNavColors("dashboard");SampleBox.ItemsSource=sampleNames;SampleBox.SelectedIndex=0;
         timer.Tick+=(_,_)=>Tick();UserIdBox.Focus();
     }
     private readonly UiPreferences uiPreferences=new();
@@ -36,17 +36,24 @@ public partial class MainWindow : Window
             bool selected=item.Item2==page;item.Item1.Background=new SolidColorBrush((Color)ColorConverter.ConvertFromString(selected?"#2B4770":"#142238"));item.Item1.Foreground=new SolidColorBrush((Color)ColorConverter.ConvertFromString(selected?"#F8FAFC":"#CAD6E8"));item.Item1.FontWeight=selected?FontWeights.SemiBold:FontWeights.Normal;
         }
     }
-    private void ApplyFontSize(int size,bool persist)
+    private UiLayoutOptions uiLayout=new();private Window? displaySettings;
+    private void ApplyUiLayout(UiLayoutOptions value,bool persist)
     {
-        size=Math.Clamp(size,12,18);var keys=Resources.Keys.OfType<string>().Where(k=>k.StartsWith("UiFont")||k.StartsWith("UiLine")||k.StartsWith("UiHeight")||k.StartsWith("UiRow")).ToList();
-        foreach(var key in keys){var number=new string(key.Where(char.IsDigit).ToArray());var value=double.Parse(number,System.Globalization.CultureInfo.InvariantCulture)*size/13.0;Resources[key]=key.StartsWith("UiRow")?new GridLength(value):(object)value;}
-        Resources["UiSidebar"]=new GridLength(216*Math.Max(1,size/13.0));
-        if(FontSizeSlider.Value!=size)FontSizeSlider.Value=size;FontSizeValueText.Text=$"{size} px";
-        if(persist)try{uiPreferences.SaveFontSize(size);}catch(Exception e) when(e is IOException or UnauthorizedAccessException){StatusText.Text="글자 크기 저장 실패: "+e.Message;}
+        value.Validate();uiLayout=value;
+        foreach(var key in Resources.Keys.OfType<string>().Where(k=>k.StartsWith("UiFont")||k.StartsWith("UiLine")||k.StartsWith("UiHeight")||k.StartsWith("UiRow")).ToList()){
+            var n=double.Parse(new string(key.Where(char.IsDigit).ToArray()),System.Globalization.CultureInfo.InvariantCulture);
+            double ratio=key.StartsWith("UiFont")&&n>=18?value.Title/28.0:value.Body/13.0;
+            if(key.StartsWith("UiRow"))ratio=Math.Max(1,Math.Max(value.Body/13.0,value.Title/28.0));
+            if(key=="UiHeight40")ratio=value.Table/12.0;if(key=="UiHeight36")ratio=value.TableHeader/12.0;
+            Resources[key]=key.StartsWith("UiRow")?new GridLength(n*ratio):(object)(n*ratio);
+        }
+        Resources["MenuFontSize"]=(double)value.Menu;Resources["TableFontSize"]=(double)value.Table;Resources["TableHeaderFontSize"]=(double)value.TableHeader;
+        Resources["UiSidebar"]=new GridLength(216*Math.Max(1,value.Menu/13.0));
+        ProfileColumn.Width=new GridLength(value.ProfileWidth);NicLeftColumn.Width=new GridLength(value.NicPercent,GridUnitType.Star);NicRightColumn.Width=new GridLength(100-value.NicPercent,GridUnitType.Star);
+        if(persist)try{uiPreferences.SaveLayout(value);}catch(Exception e) when(e is IOException or UnauthorizedAccessException){StatusText.Text="화면 설정 저장 실패: "+e.Message;}
     }
-    private void ScreenSettingsClick(object sender,RoutedEventArgs e)=>ScreenSettingsPopup.IsOpen=!ScreenSettingsPopup.IsOpen;
-    private void FontSizeChanged(object sender,RoutedPropertyChangedEventArgs<double> e){if(FontSizeValueText!=null)ApplyFontSize((int)e.NewValue,true);}
-    private void ResetFontClick(object sender,RoutedEventArgs e)=>ApplyFontSize(13,true);
+    private void ScreenSettingsClick(object sender,RoutedEventArgs e){if(displaySettings!=null){displaySettings.Activate();return;}displaySettings=new DisplaySettingsWindow(uiLayout,v=>ApplyUiLayout(v,true)){Owner=this};displaySettings.Closed+=(_,_)=>displaySettings=null;displaySettings.Show();}
+    private void PaneResized(object sender,System.Windows.Controls.Primitives.DragCompletedEventArgs e){displaySettings?.Close();ApplyUiLayout(uiLayout with{ProfileWidth=Math.Clamp((int)ProfileColumn.ActualWidth,180,500),NicPercent=Math.Clamp((int)(100*NicLeftColumn.ActualWidth/Math.Max(1,NicLeftColumn.ActualWidth+NicRightColumn.ActualWidth)),30,75)},true);}
     private static T? Ancestor<T>(DependencyObject? node) where T:DependencyObject
     {
         while(node!=null){if(node is T found)return found;node=node is System.Windows.ContentElement?LogicalTreeHelper.GetParent(node):VisualTreeHelper.GetParent(node);}return null;
@@ -56,7 +63,7 @@ public partial class MainWindow : Window
     private void ProfileKeyDown(object sender,KeyEventArgs e){if(e.Key==Key.Delete&&ProfilesList.SelectedItem!=null){DeleteProfileClick(sender,new());e.Handled=true;}}
     private void EditContextOpened(object sender,RoutedEventArgs e)
     {
-        if(sender is ContextMenu menu){menu.FontSize=FontSize;foreach(var item in menu.Items.OfType<MenuItem>())item.IsEnabled=session?.Role==UserRole.Admin&&!engine.IsRunning&&!busy;}
+        if(sender is ContextMenu menu){menu.FontSize=uiLayout.Menu;foreach(var item in menu.Items.OfType<MenuItem>())item.IsEnabled=session?.Role==UserRole.Admin&&!engine.IsRunning&&!busy;}
     }
     private void RemoveBindingConfirmClick(object sender,RoutedEventArgs e)
     {
@@ -107,7 +114,7 @@ public partial class MainWindow : Window
         try{(session??throw new UnauthorizedAccessException("로그인이 필요합니다.")).RequireAdmin();if(engine.IsRunning||busy)throw new InvalidOperationException("기록 중에는 설정을 변경할 수 없습니다.");return true;}
         catch(Exception error){ShowError(error);return false;}
     }
-    private void ShowError(Exception error){StatusText.Text=error.Message;MessageBox.Show(this,error.Message,"SAAM_DAS",MessageBoxButton.OK,MessageBoxImage.Warning);}
+    private void ShowError(Exception error){StatusText.Text=error.Message;MessageBox.Show(this,error.Message,"DRAS",MessageBoxButton.OK,MessageBoxImage.Warning);}
     private void SaveChange(Action<WorkspaceSettings> change)
     {
         if(!AdminAction())return;
@@ -128,21 +135,22 @@ public partial class MainWindow : Window
     private void DashboardClick(object sender,RoutedEventArgs e){if(!busy)ShowPage("dashboard");}
     private void ProfilesClick(object sender,RoutedEventArgs e){if(AdminAction())ShowPage("profiles");}
     private void SettingsClick(object sender,RoutedEventArgs e){if(AdminAction())ShowPage("settings");}
-    private void NewEditor(){editingProfileId=null;ProfileNameBox.Text="";SenderBox.Text="";ReceiverBox.Text="";selectedIcd=[];selectedIcdName="";IcdText.Text="선택된 CSV 없음";currentSchema=null;IcdFields.ItemsSource=null;DecodeGrid.ItemsSource=null;MessageBoxSelect.ItemsSource=null;WriteFieldBox.ItemsSource=null;WriteValueBox.Text="0";WriteRawBox.IsChecked=false;BothDirectionsBox.IsChecked=true;GuestIcdAllowedBox.IsChecked=false;}
+    private void NewEditor(){editingProfileId=null;ProfileNameBox.Text="";SenderBox.Text="";ReceiverBox.Text="";selectedIcd=[];selectedIcdName="";selectedStructs=[];ByteOrderBox.SelectedIndex=0;StructPackBox.SelectedIndex=0;StructBitBox.SelectedIndex=0;IcdEnabledBox.IsChecked=true;IcdText.Text="선택된 CSV 없음";currentSchema=null;IcdFields.ItemsSource=null;DecodeGrid.ItemsSource=null;MessageBoxSelect.ItemsSource=null;WriteFieldBox.ItemsSource=null;WriteValueBox.Text="0";WriteRawBox.IsChecked=false;BothDirectionsBox.IsChecked=true;GuestIcdAllowedBox.IsChecked=false;}
     private void NewProfileClick(object sender,RoutedEventArgs e){if(AdminAction()){ProfilesList.SelectedItem=null;NewEditor();}}
     private void ProfileSelected(object sender,SelectionChangedEventArgs e)
     {
         if(ProfilesList.SelectedItem is not RecordProfile p)return;
-        editingProfileId=p.Id;ProfileNameBox.Text=p.Name;SenderBox.Text=string.Join(", ",p.SenderIps);ReceiverBox.Text=string.Join(", ",p.ReceiverIps);selectedIcd=p.IcdContent;selectedIcdName=p.IcdName;BothDirectionsBox.IsChecked=p.BothDirections;GuestIcdAllowedBox.IsChecked=settings.GuestIcdAllowList.Contains(p.IcdId);UpdateIcdPreview();
+        editingProfileId=p.Id;ProfileNameBox.Text=p.Name;SenderBox.Text=string.Join(", ",p.SenderIps);ReceiverBox.Text=string.Join(", ",p.ReceiverIps);selectedIcd=p.IcdContent;selectedIcdName=p.IcdName;selectedStructs=p.StructSources.Select(x=>new StructSource(x.Name,[..x.Content])).ToList();ByteOrderBox.SelectedIndex=p.ByteOrder=="be"?1:p.ByteOrder=="le"?2:0;StructPackBox.SelectedIndex=Array.IndexOf(new[]{1,2,4,8},p.StructPack);StructBitBox.SelectedIndex=p.StructBitOrder=="msb0"?1:0;IcdEnabledBox.IsChecked=p.Enabled;BothDirectionsBox.IsChecked=p.BothDirections;GuestIcdAllowedBox.IsChecked=settings.GuestIcdAllowList.Contains(p.IcdId);UpdateIcdPreview();
     }
     private IcdSchema? currentSchema;
     private void UpdateIcdPreview()
     {
         currentSchema=null;IcdFields.ItemsSource=null;DecodeGrid.ItemsSource=null;MessageBoxSelect.ItemsSource=null;
         try {
+            if(selectedIcd.Length==0){IcdText.Text="선택된 CSV 없음 · 헤더 "+selectedStructs.Count+"개";return;}
             if(!selectedIcdName.EndsWith(".csv",StringComparison.OrdinalIgnoreCase))throw new ArgumentException("기존 IDL 원본을 유지합니다. CSV로 다시 선택한 후 저장하세요.");
-            currentSchema=IcdCsv.Parse(selectedIcd);IcdFields.ItemsSource=currentSchema.Fields;MessageBoxSelect.ItemsSource=currentSchema.Messages;MessageBoxSelect.SelectedIndex=0;
-            IcdText.Text=$"{selectedIcdName} · {currentSchema.Fields.Count} fields / {currentSchema.Messages.Length} messages · {currentSchema.EncodingName} · BIG ENDIAN";
+            currentSchema=IcdCsv.Parse(selectedIcd,SelectedByteOrder,selectedStructs,SelectedPack,SelectedBitOrder);IcdFields.ItemsSource=currentSchema.Fields;MessageBoxSelect.ItemsSource=currentSchema.Messages;MessageBoxSelect.SelectedIndex=0;
+            IcdText.Text=$"{selectedIcdName} · {currentSchema.Fields.Count} fields / {currentSchema.Messages.Length} messages · {currentSchema.EncodingName} · {SelectedByteOrder.ToUpperInvariant()} · 헤더 {selectedStructs.Count}개";
             if(currentSchema.Warnings.Count>0)IcdText.Text+="\n"+string.Join(" / ",currentSchema.Warnings);
         }catch(ArgumentException error){IcdText.Text="CSV 오류: "+error.Message;}
     }
@@ -170,12 +178,19 @@ public partial class MainWindow : Window
             DecodeGrid.ItemsSource=currentSchema.Decode(message,Convert.FromHexString(hex));
         }catch(Exception error) when(error is ArgumentException or FormatException){ShowError(error);}
     }
+    private string SelectedByteOrder=>ByteOrderBox.SelectedIndex==1?"be":ByteOrderBox.SelectedIndex==2?"le":"csv";
+    private int SelectedPack=>new[]{1,2,4,8}[Math.Max(0,StructPackBox.SelectedIndex)];
+    private string SelectedBitOrder=>StructBitBox.SelectedIndex==1?"msb0":"lsb0";
+    private void IcdOptionChanged(object sender,SelectionChangedEventArgs e){if(IcdText!=null&&StructBitBox!=null&&StructPackBox!=null)UpdateIcdPreview();}
+    private void ChooseStructClick(object sender,RoutedEventArgs e){if(!AdminAction())return;var d=new OpenFileDialog{Filter="C/C++ headers|*.h;*.hpp",Multiselect=true};if(d.ShowDialog(this)!=true)return;try{if(d.FileNames.Length>128||d.FileNames.Sum(f=>new FileInfo(f).Length)>16*1024*1024)throw new ArgumentException("헤더는 128개 / 합계 16 MB 이하로 선택하세요.");var items=d.FileNames.Select(f=>new StructSource(Path.GetFileName(f),File.ReadAllBytes(f))).ToList();CStructParser.Parse(items,SelectedPack,SelectedByteOrder=="le"?"le":"be",SelectedBitOrder);selectedStructs=items;UpdateIcdPreview();}catch(Exception error){ShowError(error);}}
+    private void ClearStructClick(object sender,RoutedEventArgs e){if(!AdminAction())return;selectedStructs=[];UpdateIcdPreview();}
+    private void ReloadIcdClick(object sender,RoutedEventArgs e){if(!AdminAction())return;try{var loaded=store.Load(session!);settings.ClearPlaintext();settings=loaded;ReloadEditors();UpdateDashboard();NewEditor();StatusText.Text="암호화 저장소의 ICD 목록을 다시 읽었습니다.";}catch(Exception error){ShowError(error);}}
     private void ChooseIcdClick(object sender,RoutedEventArgs e)
     {
         if(!AdminAction())return;
         var d=new OpenFileDialog {Title="IDLStudio CSV ICD 선택",Filter="IDLStudio CSV (*.csv)|*.csv"};
         if(d.ShowDialog()!=true)return;
-        try{var info=new FileInfo(d.FileName);if(info.Length==0||info.Length>16*1024*1024)throw new ArgumentException("ICD는 1 byte ~ 16 MB이어야 합니다.");var bytes=File.ReadAllBytes(d.FileName);IcdCsv.Parse(bytes);selectedIcd=bytes;selectedIcdName=info.Name;UpdateIcdPreview();}catch(Exception error){ShowError(error);}
+        try{var info=new FileInfo(d.FileName);if(info.Length==0||info.Length>16*1024*1024)throw new ArgumentException("ICD는 1 byte ~ 16 MB이어야 합니다.");var bytes=File.ReadAllBytes(d.FileName);selectedIcd=bytes;selectedIcdName=info.Name;UpdateIcdPreview();}catch(Exception error){ShowError(error);}
     }
     private void UseSampleClick(object sender,RoutedEventArgs e){if(!AdminAction())return;var sample=settings.Profiles.FirstOrDefault(p=>p.Name=="인터페이스 "+(char)('A'+SampleBox.SelectedIndex));if(sample==null){ShowError(new ArgumentException("초기 샘플이 없습니다. CSV를 가져오세요."));return;}selectedIcdName=sample.IcdName;selectedIcd=[..sample.IcdContent];UpdateIcdPreview();}
     private static List<string> ParseIps(string text)=>text.Split([',',';','\r','\n',' ','\t'],StringSplitOptions.RemoveEmptyEntries).Select(x=>IPAddress.TryParse(x,out var ip)?ip.ToString():x).Distinct().ToList();
@@ -183,7 +198,7 @@ public partial class MainWindow : Window
     {
         if(!AdminAction())return;
         try {
-            var p=new RecordProfile {Id=editingProfileId??Guid.NewGuid().ToString("N"),Name=ProfileNameBox.Text.Trim(),IcdName=selectedIcdName,IcdContent=[..selectedIcd],SenderIps=ParseIps(SenderBox.Text),ReceiverIps=ParseIps(ReceiverBox.Text),BothDirections=BothDirectionsBox.IsChecked==true};p.Validate();IcdProtection.Seal(session!,p);var allowGuest=GuestIcdAllowedBox.IsChecked==true;
+            var p=new RecordProfile {Id=editingProfileId??Guid.NewGuid().ToString("N"),Name=ProfileNameBox.Text.Trim(),IcdName=selectedIcdName,IcdContent=[..selectedIcd],StructSources=selectedStructs.Select(x=>new StructSource(x.Name,[..x.Content])).ToList(),ByteOrder=SelectedByteOrder,StructPack=SelectedPack,StructBitOrder=SelectedBitOrder,Enabled=IcdEnabledBox.IsChecked==true,SenderIps=ParseIps(SenderBox.Text),ReceiverIps=ParseIps(ReceiverBox.Text),BothDirections=BothDirectionsBox.IsChecked==true};p.Validate();IcdProtection.Seal(session!,p);var allowGuest=GuestIcdAllowedBox.IsChecked==true;
             SaveChange(next=>{if(next.Profiles.Any(x=>x.Id!=p.Id&&x.Name.Equals(p.Name,StringComparison.OrdinalIgnoreCase)))throw new ArgumentException("프로파일 이름이 중복되었습니다.");next.Profiles.RemoveAll(x=>x.Id==p.Id);next.Profiles.Add(p);next.GuestIcdAllowList.RemoveAll(id=>id==p.IcdId);if(allowGuest)next.GuestIcdAllowList.Add(p.IcdId);});
         }catch(Exception error){ShowError(error);}
     }

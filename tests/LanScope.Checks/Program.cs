@@ -183,7 +183,7 @@ var oneByte=Parse("name,byte_offset,bit_length,type\nvalue,0,8,uint");
 bool unchanged=true;for(int i=0;i<256;i++)unchanged&=oneByte.Decode("Default",new byte[]{(byte)i})[0].Value==i.ToString();
 Check(unchanged,"all 256 single-byte values remain unchanged");
 Check(Parse("name,byte_offset,bit_length,type\nvalue,0,16,uint").Decode("Default",new byte[]{0x12,0x34})[0].Value=="4660","big endian is the default without endian column");
-Throws(()=>Parse(Header+"M,x,0,0,16,uint,le,msb0,1,0,,no"),"little endian CSV rejected");
+Check(Parse(Header+"M,x,0,0,16,uint,le,msb0,1,0,,yes").Decode("M",new byte[]{0x34,0x12})[0].Value=="4660","little endian CSV supported");
 Check(Parse(Header+"M,x,0,4,8,uint,be,lsb0,1,0,,cross").Decode("M",new byte[]{0xab,0xcd})[0].Raw=="173","LSB-numbered cross-byte slice concatenation");
 Check(Parse(Header+"M,x,0,4,8,uint,be,msb0,1,0,,cross").Decode("M",new byte[]{0xab,0xcd})[0].Raw=="188","MSB-numbered cross-byte slice concatenation");
 Check(Parse("name,byte_offset,bit_length,type\nu,0,64,uint").Decode("Default",Enumerable.Repeat((byte)255,8).ToArray())[0].Raw=="18446744073709551615","unsigned 64-bit precision preserved");
@@ -207,4 +207,48 @@ Check(IcdCsv.Parse(new byte[]{255,254}.Concat(Encoding.Unicode.GetBytes(korean))
 Check(Parse("name;byte_offset;bit_length;type\nx;0;8;uint").Fields.Count==1,"semicolon-delimited CSV");
 Check(Parse("name\tbyte_offset\tbit_length\ttype\nx\t0\t8\tuint").Fields.Count==1,"tab-delimited export");
 Check(Parse(Header+"M,x,0,0,8,uint,,,,,,").Fields[0].Endian=="be","blank optional columns use explicit defaults");
+// DRAS: endian, explicit C layouts and sealed header bundles.
+var structBytes=File.ReadAllBytes(Path.Combine(root,"samples/PacketLayout.h"));
+var structCsv=File.ReadAllBytes(Path.Combine(root,"samples/StructTelemetry.csv"));
+var headerSources=new List<StructSource>{new("PacketLayout.h",structBytes)};
+var structSchema=IcdCsv.Parse(structCsv,"be",headerSources,1,"lsb0");
+Check(structSchema.RequiredBytes("Envelope")==13&&structSchema.Fields.Count==8,"nested structs and fixed arrays flatten with packed offsets");
+var structPayload=new byte[13];structPayload[3]=0xA5;structPayload[4]=0xDA;
+var structBefore=structSchema.Decode("Envelope",structPayload).ToDictionary(f=>f.Name);
+Check(structBefore["packet.telemetry.mode"].Value=="2"&&structBefore["packet.telemetry.count"].Value=="2653","big endian bit fields use integer storage unit, lsb allocation");
+structSchema.WriteValue("Envelope","packet.telemetry.mode","5",structPayload);
+Check(structPayload[3]==0xA5&&structPayload[4]==0xDD&&structSchema.Decode("Envelope",structPayload)[1].Error=="","storage bit write preserves surrounding bits");
+var leSchema=IcdCsv.Parse(structCsv,"le",headerSources,1,"lsb0");
+leSchema.WriteValue("Envelope","packet.telemetry.sequence","4660",structPayload);
+Check(structPayload[1]==0x34&&structPayload[2]==0x12,"little endian nested struct scalar write");
+leSchema.WriteValue("Envelope","packet.telemetry.count","4095",structPayload);
+Check(leSchema.Decode("Envelope",structPayload).Single(f=>f.Name=="packet.telemetry.count").Value=="4095","little endian storage bit read/write");
+var msbSchema=IcdCsv.Parse(structCsv,"be",headerSources,1,"msb0");
+var structMsbPayload=new byte[13];msbSchema.WriteValue("Envelope","packet.telemetry.mode","5",structMsbPayload);
+Check(structMsbPayload[3]==0xA0&&structMsbPayload[4]==0,"explicit msb0 storage allocation");
+var natural=CStructParser.Parse([new("padding.h",Encoding.UTF8.GetBytes("struct Padding { uint8_t x; uint32_t y; uint8_t z; };"))],4);
+Check(natural["Padding"].Size==12&&natural["Padding"].Fields[1].ByteOffset==4,"natural alignment and tail padding with pack4");
+Throws(()=>CStructParser.Parse([new("bad.h",Encoding.UTF8.GetBytes("struct Bad { uint8_t *pointer; };"))]),"C pointer declarations rejected");
+Throws(()=>CStructParser.Parse([new("bad.h",Encoding.UTF8.GetBytes("struct Recursive { Recursive value; };"))]),"recursive structs rejected");
+Throws(()=>IcdCsv.Parse(structCsv),"struct CSV requires external header");
+var bundled=new RecordProfile{Name="Bundle",IcdName="StructTelemetry.csv",IcdContent=[..structCsv],StructSources=headerSources.Select(s=>new StructSource(s.Name,[..s.Content])).ToList(),ByteOrder="le",SenderIps=["192.0.2.1"],ReceiverIps=["192.0.2.2"]};
+bundled.Validate();IcdProtection.Seal(admin,bundled);GuestIcdAccess.Seal(admin,bundled,GuestIcdAccess.PublicKey(guest!));
+Check(!Encoding.UTF8.GetString(bundled.EncryptedIcd).Contains("TelemetryHeader"),"external header is absent from encrypted bundle plaintext search");
+var bundleId=bundled.IcdId;bundled.ClearPlaintext();IcdProtection.Open(admin,bundled);
+Check(bundled.StructSources.Count==1&&bundled.StructSources[0].Content.SequenceEqual(structBytes)&&bundled.ParseSchema().RequiredBytes("Envelope")==13,"encrypted CSV and headers reopen together");
+var guestBundle=GuestIcdAccess.Open(guest!,bundled);var guestTemporary=new RecordProfile();try{IcdBundle.Unpack(guestBundle,guestTemporary);Check(guestTemporary.StructSources.Count==1&&IcdBundle.Fingerprint(guestTemporary)==bundleId,"authorized guest recipient can open sealed struct bundle internally");}finally{System.Security.Cryptography.CryptographicOperations.ZeroMemory(guestBundle);guestTemporary.ClearPlaintext();}
+var enabledSettings=new WorkspaceSettings{Profiles=[bundled]};bundled.Enabled=false;
+Check(!bundled.Matches(IPAddress.Parse("192.0.2.1"),IPAddress.Parse("192.0.2.2")),"inactive ICD classification disabled");
+try{PcapCsvConverter.Messages(admin,enabledSettings,bundled.Id);throw new Exception("inactive conversion allowed");}catch(UnauthorizedAccessException){Check(true,"inactive ICD conversion denied independently of capture");}
+var layoutFolder=Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString("N"));try{var prefs=new UiPreferences(Path.Combine(layoutFolder,"layout.bin"));var layout=new UiLayoutOptions(17,14,11,20,32,350,45);prefs.SaveLayout(layout);Check(prefs.LoadLayout()==layout,"independent fonts and pane widths persist");}finally{Directory.Delete(layoutFolder,true);}
+
+var bundleRecordingDirectory=Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString("N"));Directory.CreateDirectory(bundleRecordingDirectory);
+try {
+ bundled.ReceiverIps=["198.51.100.2"];bundled.Enabled=true;var complete=frame.Take(42).Concat(new byte[13]).ToArray();complete[16]=0;complete[17]=41;complete[38]=0;complete[39]=21;complete[42]=7;complete[43]=0x34;complete[44]=0x12;
+ var input=Path.Combine(bundleRecordingDirectory,"struct.pcap");using(var writer=new NicRecording(input,"NIC",LinkLayers.Ethernet,[bundled])){writer.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,1),complete));}
+ enabledSettings.GuestIcdAllowList=[bundled.IcdId];var structOutput=Path.Combine(bundleRecordingDirectory,"struct.csv");var converted=PcapCsvConverter.Convert(guest!,enabledSettings.ForSession(guest!),bundled.Id,"Envelope",input,structOutput);Check(converted.Rows==1&&File.ReadAllText(structOutput).Contains("\"4660\""),"guest PCAP CSV conversion uses sealed external struct and little endian options");
+ bundled.Enabled=false;using(var writer=new NicRecording(Path.Combine(bundleRecordingDirectory,"inactive.pcap"),"NIC",LinkLayers.Ethernet,[bundled])){writer.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,2),complete));Check(writer.Total.Packets==1&&writer.Snapshot("recording").Single().Packets==0,"inactive ICD still retains whole NIC PCAP frames");}
+ using(var reader=new CaptureFileReaderDevice(Path.Combine(bundleRecordingDirectory,"inactive.pcap"))){reader.Open();Check(reader.GetNextPacket(out var captured)==GetPacketStatus.PacketRead&&captured.GetPacket().Data.SequenceEqual(complete),"inactive ICD standard PCAP frame bytes unchanged");}
+}finally{Directory.Delete(bundleRecordingDirectory,true);bundled.ClearPlaintext();}
+var aliasLayout=CStructParser.Parse([new("alias.h",Encoding.UTF8.GetBytes("struct Value { uint16_t number; }; typedef struct Value Value; typedef struct Value Alias; struct Packet { Alias item; };"))]);Check(aliasLayout["Packet"].Size==2,"common typedef struct tag aliases supported");
 Console.WriteLine($"{checks} meaningful checks passed. Windows DPAPI/WPF/live NIC tests remain Windows-only.");

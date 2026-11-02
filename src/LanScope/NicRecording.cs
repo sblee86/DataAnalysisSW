@@ -16,7 +16,7 @@ internal sealed class NicRecording(string path,string nic,LinkLayers linkType,IE
         if(ip==null)return;
         foreach(var m in mappings.Where(m=>m.Profile.Matches(ip.SourceAddress,ip.DestinationAddress)))m.Counter.Add(raw.Data.Length,raw.Timeval.Date.ToUniversalTime());
     }
-    internal IEnumerable<MappingSnapshot> Snapshot(string state)=>mappings.Select(m=>new MappingSnapshot(nic,m.Profile.Name,m.Counter.Packets,m.Counter.Bytes,m.Counter.MinSize,m.Counter.MaxSize,m.Counter.Average,m.Counter.LastPacket?.ToLocalTime().ToString("HH:mm:ss.fff")??"—",state,deviceId,m.Profile.Id));
+    internal IEnumerable<MappingSnapshot> Snapshot(string state)=>mappings.Select(m=>new MappingSnapshot(nic,m.Profile.Name,m.Counter.Packets,m.Counter.Bytes,m.Counter.MinSize,m.Counter.MaxSize,m.Counter.Average,m.Counter.LastPacket?.ToLocalTime().ToString("HH:mm:ss.fff")??"—",m.Profile.Enabled?state:"ICD 비활성 · PCAP 기록 유지",deviceId,m.Profile.Id));
     internal void Flush()=>file.Flush();
     public void Dispose()=>file.Dispose();
 }

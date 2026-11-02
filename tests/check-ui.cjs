@@ -1,0 +1,27 @@
+const {chromium}=require('playwright'),fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
+const root=path.resolve(__dirname,'..');
+(async()=>{
+ const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
+ try {
+ const p=await browser.newPage({viewport:{width:1440,height:960}}),errors=[];p.on('pageerror',e=>errors.push(e.message));p.on('dialog',d=>d.accept());
+ await p.route('https://dras-preview.test/**',r=>{const filename=new URL(r.request().url()).pathname.split('/').pop()||'ui-preview.html';return r.fulfill({status:200,contentType:filename.endsWith('.js')?'application/javascript':'text/html',body:fs.readFileSync(path.join(root,'design',filename))})});
+ await p.goto('https://dras-preview.test/');assert.match(await p.title(),/^DRAS/);
+ async function font(key,n){await p.locator('#font'+key).fill(String(n));await p.locator('#font'+key).dispatchEvent('input')}
+ const fontSize=selector=>p.locator(selector).first().evaluate(e=>parseFloat(getComputedStyle(e).fontSize));
+ await p.locator('#screenSettings').click();await font('Body',17);await font('Menu',15);await font('Table',11);await font('TableHeader',20);await font('Title',32);
+ assert.equal(await fontSize('body'),17);assert.equal(await fontSize('.nav button'),15);assert.equal(await fontSize('table'),11);assert.equal(await fontSize('th'),20);assert.equal(await fontSize('#pageTitle'),32);
+ await p.reload();assert.equal(await p.locator('#fontTableHeader').inputValue(),'20');await p.locator('#screenSettings').click();await p.locator('#resetFont').click();await p.locator('#screenSettings').click();
+ const shot=n=>p.screenshot({path:path.join(root,'design/screenshots',n+'.png'),fullPage:true});await shot('login');
+ async function login(id,password){await p.locator('#userId').fill(id);await p.locator('#password').fill(password);await p.locator('#loginButton').click();await p.locator('#workspaceView').waitFor({state:'visible'})}await login('admin','admin');
+ await p.locator('[data-page=profiles]').click();await p.locator('#icdFile').setInputFiles(path.join(root,'samples/StructTelemetry.csv'));await p.locator('#structFiles').setInputFiles(path.join(root,'samples/PacketLayout.h'));await p.waitForFunction(()=>currentSchema?.fields.length===8);assert.match(await p.locator('#icdLabel').innerText(),/헤더 1개/);
+ await p.locator('#byteOrder').selectOption('le');await p.locator('#payloadHex').fill('00 34 12 DA A5 00 00 00 00 00 00 00 00');await p.locator('#decodeHex').click();assert.match(await p.locator('#decodeRows').innerText(),/4660/);
+ await p.locator('#writeField').selectOption('packet.telemetry.mode');await p.locator('#writeValue').fill('5');await p.locator('#writeFieldButton').click();assert.equal((await p.locator('#payloadHex').inputValue()).split(' ')[3],'DD');
+ await p.locator('#profileName').fill('헤더 기반 ICD');await p.locator('#senderIps').fill('192.0.2.1');await p.locator('#receiverIps').fill('198.51.100.2');await p.locator('#icdEnabled').uncheck();await p.locator('#profileForm .primary').click();await p.waitForFunction(()=>state.profiles.length===4);assert.match(await p.locator('#profileList').innerText(),/비활성 · LE/);await p.locator('[data-profile]').last().click();assert.equal(await p.locator('#byteOrder').inputValue(),'le');assert.equal(await p.locator('#icdEnabled').isChecked(),false);assert.equal(await p.evaluate(()=>currentSchema.fields.length),8);await shot('profile');
+ await p.locator('#screenSettings').click();await font('ProfileWidth',330);assert.equal(Math.round(await p.locator('.profiles').evaluate(e=>e.getBoundingClientRect().width)),330);await font('NicPercent',50);await font('TableHeader',16);await shot('font-settings');await p.locator('#screenSettings').click();
+ await p.locator('[data-page=settings]').click();await p.locator('[data-nic=nic1]').click();await p.locator('#bindingProfiles input').last().check();await p.locator('#saveBinding').click();await shot('settings');
+ await p.locator('[data-page=dashboard]').click();await p.locator('#start').click();await p.waitForFunction(()=>state.rawPackets>0);assert.equal(await p.evaluate(()=>state.rows[0].packets),0);assert.match(await p.locator('#monitorRows').innerText(),/ICD 비활성/);await p.locator('#stop').click();await shot('dashboard');
+ await p.locator('[data-page=conversion]').click();const inactiveId=await p.evaluate(()=>state.profiles.at(-1).id);await p.locator('#conversionProfile').selectOption(inactiveId);assert.equal(await p.locator('#convertCsv').isDisabled(),true);assert.match(await p.locator('#conversionAccess').innerText(),/비활성/);await shot('conversion-restricted');await p.locator('#conversionProfile').selectOption('sample0');await p.locator('#choosePcap').click();await shot('conversion');
+ await p.locator('#logout').click();if(!process.env.LANSCOPE_TEST_GUEST)throw Error('LANSCOPE_TEST_GUEST binding required for guest UI check');await login('guest',process.env.LANSCOPE_TEST_GUEST);assert.equal(await p.locator('[data-page=profiles]').isVisible(),false);await p.locator('#start').click();await p.waitForFunction(()=>state.rawPackets>0);await p.locator('#stop').click();await shot('guest');
+ assert.deepEqual(errors,[]);console.log('PASS: DRAS login, independent fonts/persistence, pane width, header import, LE bit write, saved inactive catalog, full PCAP simulation and guest role checks');
+ } finally {await browser.close()}
+})().catch(e=>{console.error(e);process.exitCode=1});

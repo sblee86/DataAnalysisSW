@@ -1,10 +1,10 @@
-# SAAM_DAS (Data analysis software)
+# DRAS (Data Recording & analysis software)
 
 Windows WPF LAN 패킷 수집/PCAP 기록 및 CSV 값 변환 작업 공간.
 
 - [웹 UI 미리보기](https://sblee86.github.io/DataAnalysisSW/) — **웹 관리자 로그인: admin / admin** (공개 UI 데모 전용)
 - [전체 소스 + 오프라인 NuGet ZIP](https://github.com/sblee86/DataAnalysisSW/archive/refs/heads/main.zip)
-- [Windows x64 실행 ZIP](https://github.com/sblee86/DataAnalysisSW/raw/refs/heads/main/downloads/SAAM_DAS-win-x64.zip)
+- [Windows x64 실행 ZIP](https://github.com/sblee86/DataAnalysisSW/raw/refs/heads/main/downloads/DRAS-win-x64.zip)
 - [GitHub Pages 설정](https://github.com/sblee86/DataAnalysisSW/settings/pages): Deploy from a branch → `main` → `/docs` → Save
 
 웹 로그인 변경은 Windows 계정/ICD 키를 바꾸지 않습니다. Windows 임시 계정 암호는 이전 전달 메시지와 동일합니다. 웹은 공개 샘플과 통계 시뮬레이션만 사용하며 PCAP 변환 화면의 다운로드도 데모 결과입니다. 실제 PCAP 분석은 WPF에서 수행합니다.
@@ -12,14 +12,22 @@ Windows WPF LAN 패킷 수집/PCAP 기록 및 CSV 값 변환 작업 공간.
 ## 실행용 .NET 설치 파일 포함
 
 - [Windows .NET 8 Desktop Runtime x64 설치 파일](https://github.com/sblee86/DataAnalysisSW/raw/refs/heads/main/installers/dotnet/windowsdesktop-runtime-8.0.33-win-x64.exe)을 `installers/dotnet/`에 포함했습니다. 공식 Microsoft 배포본이며 공개 SHA-512와 대조했습니다. 원본 URL/해시는 해당 폴더의 `origin.json`, `SHA512SUMS.txt`에 있습니다.
-- 배포된 `SAAM_DAS.exe`는 런타임 포함형이므로 보통 별도 설치 없이 실행됩니다. 설치 파일은 요청하신 환경용으로 함께 제공합니다. Linux에서 설치 EXE 자체를 실행 검증한 것은 아닙니다.
+- 배포된 `DRAS.exe`는 런타임 포함형이므로 보통 별도 설치 없이 실행됩니다. 설치 파일은 요청하신 환경용으로 함께 제공합니다. Linux에서 설치 EXE 자체를 실행 검증한 것은 아닙니다.
 - **Desktop Runtime 설치와 SDK 설치는 다릅니다.** VS2022에서 소스를 빌드하려면 아래 안내의 .NET SDK 8.0.427이 필요합니다. Npcap도 별도 설치 대상입니다.
+
+## CSV + C/C++ 헤더 가져오기 / 활성 ICD 목록
+
+관리자 → 인터페이스 관리에서 CSV와 필요한 `.h/.hpp`를 함께 선택하고 바이트 순서·pack·비트 순서를 지정한 뒤 저장하세요. CSV의 `type=struct`와 `struct_name` 또는 `type=struct:Envelope`가 헤더 구조체를 참조합니다. [입력 규칙과 제한](docs/CSV-ICD.md)을 확인하세요. 공개 샘플 `samples/StructTelemetry.csv` + `samples/PacketLayout.h`는 pack=1, lsb0 예제입니다.
+
+CSV 원본·이름·헤더 원본·헤더 이름은 함께 AES-GCM 암호화해 기존 Windows 사용자별 숨김 폴더의 `workspace.bin`에 저장합니다. 선택한 외부 원본 파일을 삭제하거나 변경하지 않습니다. 이전 CSV-only 암호문과 계정/키를 유지합니다. guest 허용 ICD만 변환 시 내부 복호화하며, 이때도 원본 편집 UI는 제공하지 않습니다.
+
+저장된 목록에는 별칭·활성/비활성·바이트 순서를 표시하고, 선택하면 저장한 헤더와 옵션을 다시 불러옵니다. **저장 ICD 다시 읽기**는 디스크의 암호화 저장소를 다시 읽습니다. **활성 ICD**를 해제하면 해당 ICD 분류와 CSV 변환을 중지하지만, NIC 전체 표준 PCAP 기록은 admin/guest 모두 계속 가능합니다. 웹은 공개 샘플을 메모리에 유지하는 검토용 시안이며 새로고침 시 가져온 ICD는 사라집니다.
 
 ## 화면 설정 / 우클릭 메뉴
 
-- 프로그램 표시 이름은 **SAAM_DAS (Data analysis software)**이며 실행 파일은 `SAAM_DAS.exe`입니다.
-- 우측 상단 **화면 설정**에서 글자 크기를 12~18px로 조절하고 기본값 13px로 되돌릴 수 있습니다. 모든 계정과 로그인 화면에서 사용할 수 있습니다. WPF는 글자 크기와 표/행 높이를 함께 조절합니다.
-- WPF 글자 크기는 `%LOCALAPPDATA%\SAAM_DAS\ui-preferences.bin` 숨김 바이너리, 웹은 브라우저 로컬 저장소에 유지합니다. 화면 설정은 인터페이스 수정 권한과 별개입니다.
+- 프로그램 표시 이름은 **DRAS (Data Recording & analysis software)**이며 실행 파일은 `DRAS.exe`입니다.
+- 우측 상단 **화면 설정**에서 본문(12~20), 메뉴(12~20), 표 내용(10~20), 표 제목(11~22), 화면 제목(20~36px)을 각각 조절합니다. 기본값은 13/13/12/12/28입니다. 로그인 화면과 모든 계정에서 사용할 수 있고, 표 행 높이도 맞춰집니다. WPF 설정 창은 크기를 조절할 수 있으며 웹 설정 패널도 모서리를 끌어 조절합니다. ICD 목록 너비와 NIC 목록 비율은 설정 또는 구분선 드래그로 조절합니다.
+- WPF 글자 크기는 `%LOCALAPPDATA%\DRAS\ui-preferences.bin` 숨김 바이너리, 웹은 브라우저 로컬 저장소에 유지합니다. 화면 설정은 인터페이스 수정 권한과 별개입니다.
 - admin이 프로파일 목록을 우클릭하면 **프로파일 삭제**, Delete 키로도 삭제할 수 있습니다. NIC 목록은 **선택 NIC 매칭 해제**, 대시보드 표는 **이 프로파일 매칭 해제**를 제공합니다. 확인 후 설정만 변경하며 PCAP 파일은 삭제하지 않습니다.
 - guest 및 기록 중에는 설정 삭제/매칭 해제를 막습니다. CSV 변환의 PCAP 경로 우클릭 **선택 해제**는 모든 계정이 사용할 수 있으며 원본을 지우지 않습니다.
 - 기존 계정/암호화 키와 `%LOCALAPPDATA%\LANscope\workspace.bin` 경로는 유지해 이전 데이터 호환성을 보존합니다. 공개 저장소 이름 `DataAnalysisSW`는 그대로입니다.
@@ -39,7 +47,7 @@ Windows WPF LAN 패킷 수집/PCAP 기록 및 CSV 값 변환 작업 공간.
 
 ## Windows 실행 및 첫 설정
 
-실행 ZIP을 해제해 `SAAM_DAS.exe`를 실행합니다. .NET과 암호화된 샘플 ICD가 단일 EXE에 포함되어 별도 .NET 런타임 설치는 필요하지 않습니다. 실제 NIC 캡처에는 **Npcap**을 별도로 설치해야 하며, 설치 옵션에 따라 Windows 관리자 권한이 필요할 수 있습니다.
+실행 ZIP을 해제해 `DRAS.exe`를 실행합니다. .NET과 암호화된 샘플 ICD가 단일 EXE에 포함되어 별도 .NET 런타임 설치는 필요하지 않습니다. 실제 NIC 캡처에는 **Npcap**을 별도로 설치해야 하며, 설치 옵션에 따라 Windows 관리자 권한이 필요할 수 있습니다.
 
 1. admin으로 로그인해 **인터페이스 관리**에서 CSV ICD와 송수신 IP를 설정합니다. 공개 CSV 샘플 3개가 초기 프로파일로 준비됩니다.
 2. **이 ICD의 PCAP → CSV 값 변환을 guest에게 허용**을 선택하면 해당 ICD의 값 변환을 허용합니다. 기본은 변환 비허용입니다. 같은 CSV 내용을 쓰는 프로파일들은 하나의 ICD 권한을 공유합니다.
@@ -72,11 +80,11 @@ guest 변환 요청은 서비스에서 허용 목록을 다시 검사합니다. 
 
 권한 변경은 다음 변환 요청에 적용됩니다. 이미 시작한 작업/내보낸 CSV/복사한 파일에 대한 소급 회수는 하지 않습니다. PCAP은 표준 원본이므로 **앱의 CSV 변환 권한이 외부 도구를 통한 분석까지 막지는 않습니다.**
 
-## CSV ICD / 빅엔디언
+## CSV ICD / 바이트 순서 선택
 
 입력은 사용자의 IDLStudio CSV를 대상으로 하며 실제 출력 예시는 아직 받지 못했습니다. 현재 헤더/비트 규칙은 [명시적인 임시 어댑터](docs/CSV-ICD.md)이며 실제 형식 호환성을 확정하지 않았습니다.
 
-- 모든 통신 값은 **빅엔디언 고정**, 1바이트는 변환하지 않습니다.
+- ICD마다 **Big endian / Little endian / CSV 필드별 설정**을 선택합니다. CSV에서 생략한 순서는 be이며 1바이트는 변환하지 않습니다.
 - 정수/부호/1~64 bit/바이트 경계 교차/float32·64/bytes/scale·bias 지원.
 - `msb0` 기본, 명시적 `lsb0` 번호 지원. 실제 bit offset 기준은 CSV 샘플로 대조해야 합니다.
 - 프로파일에서 CSV 필드 표와 수동 Payload HEX 읽기·쓰기 미리보기를 제공합니다 (admin 전용).
@@ -103,21 +111,21 @@ ICD만 암호화하고 PCAP은 표준 파일로 유지합니다.
 
 1. Visual Studio Installer에서 **.NET 데스크톱 개발** 워크로드를 설치합니다.
 2. [Windows x64 .NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)를 설치합니다. 포함된 오프라인 팩과 global.json은 **SDK 8.0.427 / 런타임 팩 8.0.33** 기준입니다. 런타임만 설치하면 소스를 빌드할 수 없습니다.
-3. 전체 저장소 ZIP을 해제하고 루트의 **SAAM_DAS.sln**을 엽니다.
-4. `SAAM_DAS`를 시작 프로젝트로 설정하고 Debug 또는 Release 빌드/F5를 사용합니다. Windows x64 타깃은 프로젝트에 지정했습니다.
+3. 전체 저장소 ZIP을 해제하고 루트의 **DRAS.sln**을 엽니다.
+4. `DRAS`를 시작 프로젝트로 설정하고 Debug 또는 Release 빌드/F5를 사용합니다. Windows x64 타깃은 프로젝트에 지정했습니다.
 5. Npcap이 없는 PC에서도 로그인 화면을 실행할 수 있지만 실제 NIC 캡처와 SharpPcap 기반 PCAP 읽기에는 Npcap이 필요합니다.
 
 기존 계정/암호화 키 리소스는 변경하지 않았습니다. .NET 10에서 만든 암호화 데모 리소스와 공개키를 .NET 8 코드로 검증했습니다. 실제 Windows 설정/기록과 IDE 실행은 로컬에서 확인해야 합니다.
 
 ## 오프라인 직접 빌드
 
-Windows x64 .NET SDK **8.0.427**을 먼저 설치하고 전체 저장소 ZIP을 받으세요. 원본 NuGet 패키지 11개와 해시/잠금 파일을 포함합니다. 코드 전용 `downloads/SAAM_DAS-source.zip`에는 용량 때문에 NuGet 피드와 설치 EXE를 제외합니다. 전체 저장소 ZIP에는 모두 포함됩니다.
+Windows x64 .NET SDK **8.0.427**을 먼저 설치하고 전체 저장소 ZIP을 받으세요. 원본 NuGet 패키지 11개와 해시/잠금 파일을 포함합니다. 코드 전용 `downloads/DRAS-source.zip`에는 용량 때문에 NuGet 피드와 설치 EXE를 제외합니다. 전체 저장소 ZIP에는 모두 포함됩니다.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build-offline.ps1
 ```
 
-결과는 `artifacts\windows-x64\SAAM_DAS.exe`. 실행 정책은 해당 호출에만 적용됩니다. Linux cross-build:
+결과는 `artifacts\windows-x64\DRAS.exe`. 실행 정책은 해당 호출에만 적용됩니다. Linux cross-build:
 
 ```sh
 dotnet restore src/LanScope/LanScope.csproj -r win-x64 --locked-mode
@@ -126,17 +134,19 @@ dotnet publish src/LanScope/LanScope.csproj -c Release -r win-x64 --self-contain
 
 ## 검증
 
+현재 .NET 8 핵심 검증 134개, 웹 파서 29개, Chromium UI 기능/권한/설정 검증을 통과했습니다. Windows 전용 DPAPI 검사 네 개는 Linux에서 건너뛰었습니다.
+
 `tests/LanScope.Checks`는 암호/정책/ICD 보호, 전체 프레임 기록, guest 변환 허용·거절·취소, 실제 libpcap PCAP→CSV, CSV 비트 해석 등을 확인합니다. 임시 암호는 `LANSCOPE_TEST_ADMIN` / `LANSCOPE_TEST_GUEST` 바인딩으로 받고 출력하지 않습니다. Windows에서는 DPAPI/Hidden/재저장 검사도 실행하며 Linux에서는 네 검사를 건너뜁니다.
 
 웹 시안은 별도 `admin/admin` 로그인, 동일 PCAP 기록 UI, 관리자 편집, ICD별 CSV 권한과 데모 다운로드를 검증합니다. 실제 Windows WPF/DPAPI/Npcap/라이브 NIC/드롭·디스크 부하 검증은 로컬에서 해야 합니다.
 
 ## 비트 필드 읽기·쓰기와 암호화 저장
 
-CSV를 읽어 인터페이스로 **저장**하면 원본과 정의는 암호화된 내부 저장소에 보관합니다. 가져오기·편집·저장은 admin만 가능하며 guest의 직접 저장 요청도 서비스에서 거절합니다. 선택했던 원본 CSV를 자동 삭제하지는 않습니다.
+CSV를 읽어 인터페이스로 **저장**하면 원본 CSV와 함께 선택한 헤더·정의는 암호화된 내부 저장소에 보관합니다. 가져오기·편집·저장은 admin만 가능하며 guest의 직접 저장 요청도 서비스에서 거절합니다. 선택했던 원본 CSV를 자동 삭제하지는 않습니다.
 
 프로파일의 메시지/쓰기 필드/값을 선택하고 **필드값 쓰기**를 누르면 현재 HEX의 해당 물리 비트 범위만 변경합니다. 다른 필드와 주변 비트는 보존하며, 바로 읽기 결과를 갱신합니다. HEX가 비어 있으면 정의된 메시지 길이의 0 버퍼를 만듭니다. 기존 버퍼가 너무 짧거나 범위를 넘는 값이면 입력을 유지하고 오류를 표시합니다.
 
 - 기본 입력은 실제값이며 `(값 - bias) / scale`로 역변환해 정수/부호/IEEE754로 씁니다. 정수로 정확히 표현되지 않는 값과 범위 초과를 거절합니다.
 - **raw 값으로 쓰기**에서는 정수 필드의 raw 정수, float의 IEEE754 unsigned 비트 패턴을 입력합니다. bool은 true/false 또는 1/0, bytes는 정확한 길이의 HEX입니다.
-- 통신은 빅엔디언, 1바이트는 그대로이며 1~64비트와 바이트 경계 교차, msb0/lsb0 번호를 지원합니다. scale=0은 실제값 역변환이 불가능하므로 raw 모드만 허용합니다.
+- 바이트 순서는 Big/Little을 선택하고 1바이트는 그대로이며 1~64비트와 바이트 경계 교차, msb0/lsb0 번호를 지원합니다. scale=0은 실제값 역변환이 불가능하므로 raw 모드만 허용합니다.
 - 이것은 버퍼/HEX 구성 및 검증 기능입니다. NIC 송신이나 원본 PCAP 덮어쓰기는 하지 않습니다.

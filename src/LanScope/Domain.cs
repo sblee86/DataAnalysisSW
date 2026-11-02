@@ -43,10 +43,17 @@ public sealed class RecordProfile
     public string Name { get; set; } = "";
     [JsonIgnore] public string IcdName { get; set; } = "";
     [JsonIgnore] public byte[] IcdContent { get; set; } = [];
+    [JsonIgnore] public List<StructSource> StructSources {get;set;}=[];
+    public string ByteOrder {get;set;}="csv";
+    public int StructPack {get;set;}=1;
+    public string StructBitOrder {get;set;}="lsb0";
+    public bool Enabled {get;set;}=true;
+    [JsonIgnore] public string CatalogLabel=>Name+" · "+(Enabled?"활성":"비활성")+" · "+ByteOrder.ToUpperInvariant();
+    public IcdSchema ParseSchema()=>IcdCsv.Parse(IcdContent,ByteOrder,StructSources,StructPack,StructBitOrder);
     public string IcdId {get;set;}="";
     public byte[] EncryptedIcd {get;set;}=[];
     public byte[] GuestConversionIcd {get;set;}=[];
-    public void ClearPlaintext(){CryptographicOperations.ZeroMemory(IcdContent);IcdContent=[];IcdName="";}
+    public void ClearPlaintext(){CryptographicOperations.ZeroMemory(IcdContent);IcdContent=[];IcdName="";foreach(var source in StructSources)CryptographicOperations.ZeroMemory(source.Content);StructSources=[];}
     public List<string> SenderIps { get; set; } = [];
     public List<string> ReceiverIps { get; set; } = [];
     public bool BothDirections { get; set; } = true;
@@ -56,7 +63,7 @@ public sealed class RecordProfile
         if(string.IsNullOrWhiteSpace(Name) || Name.Length>80) throw new ArgumentException("프로파일 이름을 1~80자로 입력하세요.");
         if(IcdContent.Length>0) {
             if(!IcdName.EndsWith(".csv",StringComparison.OrdinalIgnoreCase))throw new ArgumentException("ICD를 CSV 파일로 다시 선택하세요.");
-            IcdCsv.Parse(IcdContent);
+            ParseSchema();
         }else if(EncryptedIcd.Length==0||IcdId.Length!=64)throw new ArgumentException("관리자가 ICD를 가져와 암호화 저장해야 합니다.");
         ValidateEndpoints();
     }
@@ -69,7 +76,7 @@ public sealed class RecordProfile
     public bool Matches(IPAddress source, IPAddress destination)
     {
         bool Has(List<string> list, IPAddress address)=>list.Any(x=>IPAddress.TryParse(x,out var ip)&&ip.Equals(address));
-        return (Has(SenderIps,source)&&Has(ReceiverIps,destination)) || (BothDirections&&Has(SenderIps,destination)&&Has(ReceiverIps,source));
+        return Enabled&&((Has(SenderIps,source)&&Has(ReceiverIps,destination)) || (BothDirections&&Has(SenderIps,destination)&&Has(ReceiverIps,source)));
     }
     public override string ToString()=>Name;
 }
@@ -88,7 +95,7 @@ public sealed class WorkspaceSettings
     public bool HasGuestConversionConflict(string profileId)
     {
         foreach(var binding in Bindings) {
-            var profiles=Profiles.Where(p=>binding.ProfileIds.Contains(p.Id)).ToList();
+            var profiles=Profiles.Where(p=>p.Enabled&&binding.ProfileIds.Contains(p.Id)).ToList();
             var allowed=profiles.Where(p=>p.Id==profileId&&GuestIcdAllowList.Contains(p.IcdId));
             var denied=profiles.Where(p=>!GuestIcdAllowList.Contains(p.IcdId));
             foreach(var a in allowed)foreach(var d in denied) {
@@ -108,7 +115,7 @@ public sealed class WorkspaceSettings
         var allowed=Profiles.ToList();
         var ids=allowed.Select(p=>p.Id).ToHashSet();
         return new WorkspaceSettings {OutputDirectory=OutputDirectory,GuestIcdAllowList=[..GuestIcdAllowList],
-            Profiles=allowed.Select(p=>new RecordProfile{Id=p.Id,Name=p.Name,IcdId=p.IcdId,EncryptedIcd=[..p.EncryptedIcd],GuestConversionIcd=[..p.GuestConversionIcd],SenderIps=[..p.SenderIps],ReceiverIps=[..p.ReceiverIps],BothDirections=p.BothDirections}).ToList(),
+            Profiles=allowed.Select(p=>new RecordProfile{Id=p.Id,Name=p.Name,Enabled=p.Enabled,ByteOrder=p.ByteOrder,StructPack=p.StructPack,StructBitOrder=p.StructBitOrder,IcdId=p.IcdId,EncryptedIcd=[..p.EncryptedIcd],GuestConversionIcd=[..p.GuestConversionIcd],SenderIps=[..p.SenderIps],ReceiverIps=[..p.ReceiverIps],BothDirections=p.BothDirections}).ToList(),
             Bindings=Bindings.Select(b=>new NicBinding{DeviceId=b.DeviceId,DeviceName=b.DeviceName,ProfileIds=b.ProfileIds.Where(ids.Contains).ToList()}).Where(b=>b.ProfileIds.Count>0).ToList()};
     }
     public void ClearPlaintext(){foreach(var p in Profiles)p.ClearPlaintext();}

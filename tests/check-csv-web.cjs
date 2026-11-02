@@ -1,5 +1,5 @@
 const assert=require('node:assert/strict'),fs=require('fs'),path=require('path');
-require('../design/icd-csv.js');const api=globalThis.LanScopeCsv,root=path.resolve(__dirname,'..');let count=0;
+require('../design/c-struct.js');require('../design/icd-csv.js');const api=globalThis.LanScopeCsv,root=path.resolve(__dirname,'..');let count=0;
 function check(fn,label){fn();count++;console.log('PASS: '+label)}
 const sample=n=>api.parse(fs.readFileSync(path.join(root,'samples',n+'.csv'),'utf8'));
 check(()=>{const values=api.decode(sample('Telemetry'),'Telemetry',api.hex('00 01 B2 FF 9C 41 48 00 00'));assert.deepEqual(values.map(f=>f.raw),['1','5','1','2','-100','1095237632']);assert.equal(values[4].value,'-10.0');assert.equal(values[5].value,'12.5')},'telemetry BE / signed scale / float32');
@@ -8,7 +8,7 @@ check(()=>{const f=api.decode(sample('StatusReport'),'StatusReport',api.hex('85 
 check(()=>{const s=api.parse('name,byte_offset,bit_length,type\nx,0,8,uint');for(let i=0;i<256;i++)assert.equal(api.decode(s,'Default',new Uint8Array([i]))[0].value,String(i))},'all single bytes unchanged');
 check(()=>assert.equal(api.decode(api.parse('name,byte_offset,bit_length,type\nx,0,64,uint'),'Default',api.hex('FF FF FF FF FF FF FF FF'))[0].value,'18446744073709551615'),'uint64 exact engineering value');
 check(()=>assert.equal(api.decode(api.parse('name,byte_offset,bit_length,type\nx,0,64,int'),'Default',api.hex('80 00 00 00 00 00 00 00'))[0].value,'-9223372036854775808'),'signed64 minimum');
-check(()=>assert.throws(()=>api.parse('name,byte_offset,bit_length,type,endian\nx,0,16,uint,le'),/빅엔디언/),'little endian rejected');
+check(()=>assert.equal(api.decode(api.parse('name,byte_offset,bit_length,type,endian\nx,0,16,uint,le'),'Default',api.hex('34 12'))[0].value,'4660'),'little endian supported');
 check(()=>assert.throws(()=>api.parse('name,byte_offset,bit_length,type\nx,0,8,uint\ny,0,8,uint'),/겹칩니다/),'overlapping fields rejected');
 check(()=>assert.throws(()=>api.parse('name,byte_offset,bit_length,type\nx,0,8,uint\nx,1,8,uint'),/중복/),'duplicate field rejected');
 check(()=>assert.throws(()=>api.parse('name,byte_offset,type\nx,0,uint'),/필수/),'missing headers rejected');
@@ -24,3 +24,13 @@ check(()=>{const schema=api.parse('name,byte_offset,bit_offset,bit_length,type,b
 check(()=>assert.throws(()=>api.write(sample('Telemetry'),'Telemetry','mode','8',api.hex('00 01 B2 FF 9C 41 48 00 00')),/범위/),'reject field write overflow');
 check(()=>{const schema=sample('Telemetry'),initial=api.hex('00 01 B2 FF 9C 41 48 00 00');const out=api.write(schema,'Telemetry','voltage','3.25',initial);assert.equal(Buffer.from(out.slice(5)).toString('hex'),'40500000');assert.equal(Buffer.from(api.write(schema,'Telemetry','voltage','1095237632',initial,true).slice(5)).toString('hex'),'41480000')},'float value and raw IEEE bits writes');
 console.log(count+' web CSV parser checks passed');
+const sources=[{name:'PacketLayout.h',text:fs.readFileSync(path.join(root,'samples/PacketLayout.h'),'utf8')}],structText=fs.readFileSync(path.join(root,'samples/StructTelemetry.csv'),'utf8');
+check(()=>{const s=api.parse(structText,'be',sources),b=api.hex('00 00 00 A5 DA 00 00 00 00 00 00 00 00');assert.equal(s.fields.length,8);const rows=api.decode(s,'Envelope',b);assert.equal(rows[2].value,'2');assert.equal(rows[4].value,'2653');assert.equal(api.write(s,'Envelope','packet.telemetry.mode','5',b)[4],0xDD)},'nested arrays and BE storage-unit bit read/write');
+check(()=>{const s=api.parse(structText,'le',sources),b=new Uint8Array(13),written=api.write(s,'Envelope','packet.telemetry.sequence','4660',b);assert.equal(written[1],0x34);assert.equal(written[2],0x12);const count=api.write(s,'Envelope','packet.telemetry.count','4095',written);assert.equal(api.decode(s,'Envelope',count)[4].value,'4095')},'LE nested storage bit write/read');
+check(()=>{const s=api.parse(structText,'be',sources,1,'msb0'),b=api.write(s,'Envelope','packet.telemetry.mode','5',new Uint8Array(13));assert.equal(b[3],0xA0);assert.equal(b[4],0)},'explicit msb0 struct allocation');
+check(()=>{const s=DrasStruct.parse([{name:'padding.h',text:'struct Padding { uint8_t x; uint32_t y; uint8_t z; };'}],4);assert.equal(s.get('Padding').size,12);assert.equal(s.get('Padding').fields[1].byteOffset,4)},'explicit pack4 padding');
+check(()=>assert.throws(()=>DrasStruct.parse([{name:'pointer.h',text:'struct Pointer { uint8_t *value; };'}]),/미지원/),'pointer rejected');
+check(()=>assert.throws(()=>DrasStruct.parse([{name:'recursive.h',text:'struct Recursive { Recursive value; };'}]),/순환/),'recursive struct rejected');
+check(()=>assert.throws(()=>api.parse(structText),/외부/),'struct CSV requires header');
+check(()=>{const s=api.parse('name,byte_offset,bit_length,type,endian\nx,0,16,uint,be','le');assert.equal(api.decode(s,'Default',api.hex('34 12'))[0].value,'4660')},'profile endian overrides CSV');
+console.log(`${count} total web parser checks passed`);

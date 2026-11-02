@@ -1,0 +1,2 @@
+message,name,byte_offset,bit_offset,bit_length,type,endian,struct_name,description
+Envelope,packet,0,0,,struct,be,Envelope,Import PacketLayout.h with pack=1 and lsb0 storage allocation

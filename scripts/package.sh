@@ -8,6 +8,7 @@ cd "$repo_dir"
 mkdir -p docs
 cp design/ui-preview.html docs/index.html
 cp design/icd-csv.js docs/icd-csv.js
+cp design/c-struct.js docs/c-struct.js
 touch docs/.nojekyll
 dotnet restore src/LanScope/LanScope.csproj -r win-x64 --locked-mode
 publish_dir="$(mktemp -d "$output_dir/.publish-XXXXXX")"
@@ -21,8 +22,9 @@ def pack(root,target,skip):
   for p in sorted(root.rglob('*')):
    rel=p.relative_to(root)
    if p.is_file() and not any(x in skip for x in rel.parts): z.write(p,rel)
-pack(repo,out/'SAAM_DAS-source.zip',{'.git','bin','obj','.vs','artifacts','downloads','.nuget','nuget-offline','__pycache__','installers'})
-pack(publish,out/'SAAM_DAS-win-x64.zip',set())
+pack(repo,out/'DRAS-source.zip',{'.git','bin','obj','.vs','artifacts','downloads','.nuget','nuget-offline','__pycache__','installers'})
+pack(publish,out/'DRAS-win-x64.zip',set())
 PY
 cp design/ui-preview.html "$output_dir/ui-preview.html"
 cp design/icd-csv.js "$output_dir/icd-csv.js"
+cp design/c-struct.js "$output_dir/c-struct.js"

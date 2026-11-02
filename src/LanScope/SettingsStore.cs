@@ -53,6 +53,7 @@ public sealed class SettingsStore(string? filePath = null, byte[]? policyPublicK
         var signed=Encoding.ASCII.GetBytes("LSCFG002").Concat(encrypted).ToArray();
         var signature=IcdProtection.Sign(session,signed);IcdProtection.Verify(PublicKey(),signed,signature);
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+        if(OperatingSystem.IsWindows()){var directory=Path.GetDirectoryName(FilePath)!;File.SetAttributes(directory,File.GetAttributes(directory)|FileAttributes.Hidden);}
         var temp=FilePath+"."+Guid.NewGuid().ToString("N")+".tmp";
         try {
             using(var file=new FileStream(temp,FileMode.CreateNew,FileAccess.Write)) { file.Write(Encoding.ASCII.GetBytes("LSCFG002"));file.Write(signature);file.Write(encrypted);file.Flush(true); }

@@ -6,6 +6,8 @@
     <Compile Include="../../src/LanScope/IcdProtection.cs" Link="IcdProtection.cs" />
     <Compile Include="../../src/LanScope/GuestIcdAccess.cs" Link="GuestIcdAccess.cs" />
     <Compile Include="../../src/LanScope/LegacySessionProtection.cs" Link="LegacySessionProtection.cs" />
+    <Compile Include="../../src/LanScope/CStructParser.cs" Link="CStructParser.cs" />
+    <Compile Include="../../src/LanScope/IcdBundle.cs" Link="IcdBundle.cs" />
     <Compile Include="../../src/LanScope/IcdCsv.cs" Link="IcdCsv.cs" />
     <Compile Include="../../src/LanScope/SettingsStore.cs" Link="SettingsStore.cs" />
     <Compile Include="../../src/LanScope/CaptureEngine.cs" Link="CaptureEngine.cs" />

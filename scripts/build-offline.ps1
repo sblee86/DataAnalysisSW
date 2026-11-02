@@ -21,5 +21,5 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Offline package restore failed ($LASTEXITCODE)" }
     dotnet publish src/LanScope/LanScope.csproj -c Release -r win-x64 --self-contained true --no-restore -o $OutputDirectory
     if ($LASTEXITCODE -ne 0) { throw "WPF publish failed ($LASTEXITCODE)" }
-    Write-Host "Build completed: $OutputDirectory/SAAM_DAS.exe"
+    Write-Host "Build completed: $OutputDirectory/DRAS.exe"
 } finally { Pop-Location }
