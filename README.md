@@ -93,3 +93,15 @@ node tests/check-csv-web.cjs
 ```
 
 `downloads/DRAS-source.zip`은 코드 전용이며 NuGet/설치 파일은 제외합니다. 직접 오프라인 빌드하려면 위의 **전체 저장소 ZIP**을 받으세요. `docs/`는 GitHub Pages용 공개 UI 데모이고 실제 NIC 수집·ICD 보안은 WPF에서 수행합니다.
+
+### WPF 시작 시 DecodeGrid null 수정
+
+탭 콘텐츠를 만드는 동안 기본 SelectedIndex가 SelectionChanged를 발생시켜 뒤쪽 HEX 탭의 DecodeGrid가 생성되기 전에 미리보기를 갱신하던 문제를 수정했습니다. 선택 이벤트 7개를 XAML에서 제거하고 InitializeComponent가 끝난 뒤 한 번씩 연결합니다.
+
+`python tests/check-wpf-event-wiring.py`는 초기화 전 이벤트 연결의 재도입을 검사합니다. Windows에서는 다음 시작 검사로 실제 WPF 창 생성과 ICD 옵션 전환을 확인할 수 있습니다. 로그인·Npcap 캡처 없이 실행합니다.
+
+```powershell
+dotnet run --project tests/LanScope.StartupChecks
+```
+
+시작 검사는 Linux에서 빌드만 가능하며 실행 검증은 Windows에서 합니다.

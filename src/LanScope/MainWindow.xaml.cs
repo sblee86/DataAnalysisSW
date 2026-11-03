@@ -26,7 +26,17 @@ public partial class MainWindow : Window
     private readonly string[] sampleNames=["샘플 A","샘플 B","샘플 C"];
     public MainWindow()
     {
-        InitializeComponent();ApplyUiLayout(uiPreferences.LoadLayout(),false);UpdateNavColors("dashboard");SampleBox.ItemsSource=sampleNames;SampleBox.SelectedIndex=0;
+        InitializeComponent();
+        // SelectedIndex defaults raise events while BAML is still constructing later tab contents.
+        // Wire dependent selection handlers only after every named control has been assigned.
+        ConversionProfileBox.SelectionChanged+=ConversionProfileSelected;
+        ProfilesList.SelectionChanged+=ProfileSelected;
+        ByteOrderBox.SelectionChanged+=IcdOptionChanged;
+        StructPackBox.SelectionChanged+=IcdOptionChanged;
+        StructBitBox.SelectionChanged+=IcdOptionChanged;
+        MessageBoxSelect.SelectionChanged+=WriteMessageSelected;
+        NicGrid.SelectionChanged+=NicSelected;
+        ApplyUiLayout(uiPreferences.LoadLayout(),false);UpdateNavColors("dashboard");SampleBox.ItemsSource=sampleNames;SampleBox.SelectedIndex=0;
         timer.Tick+=(_,_)=>Tick();DashboardView.SizeChanged+=(_,_)=>FitTestName();UserIdBox.Focus();
     }
     private readonly UiPreferences uiPreferences=new();
@@ -194,7 +204,7 @@ public partial class MainWindow : Window
     private string SelectedByteOrder=>ByteOrderBox.SelectedIndex==1?"be":ByteOrderBox.SelectedIndex==2?"le":"csv";
     private int SelectedPack=>new[]{1,2,4,8}[Math.Max(0,StructPackBox.SelectedIndex)];
     private string SelectedBitOrder=>StructBitBox.SelectedIndex==1?"msb0":"lsb0";
-    private void IcdOptionChanged(object sender,SelectionChangedEventArgs e){if(IcdText!=null&&StructBitBox!=null&&StructPackBox!=null)UpdateIcdPreview();}
+    private void IcdOptionChanged(object sender,SelectionChangedEventArgs e)=>UpdateIcdPreview();
     private void ExportIcdClick(object sender,RoutedEventArgs e)=>ExportIcd(ExportFormatBox.SelectedIndex);
     private void ExportIcd(int format)
     {

@@ -76,3 +76,8 @@
 - ICD uses Current/Import/Export/HEX tabs, first current ICD; import splits sources and parse options into cards. Retain fields while switching tabs. All buttons have tooltips explaining purpose and material impact.
 - AdminCredentials wraps the EXISTING root key under the new password, verifies current password and pins its signature to old public key. Signed workspace AdminCredentialDigest commits active envelope; hash-named pending allows crash recovery. Missing/corrupt active envelope must never fall back to embedded password. Root key and existing encrypted ICDs/public resource pins remain unchanged. This changes app login, not OS controls or retroactive revocation of leaked keys. Back up workspace and credentials together.
 - Public web password changes last only this page session; reload resets admin/admin. Actual credential changes are WPF-only persisted encrypted envelopes.
+
+## WPF construction-order regression
+
+- Never attach MainWindow dependent SelectionChanged handlers in XAML: SelectedIndex and item insertion can raise events during InitializeComponent before later HEX tab controls (DecodeGrid etc.) are assigned. Wire all seven handlers once in the constructor AFTER InitializeComponent. Checking only earlier import controls is insufficient.
+- Run python3 tests/check-wpf-event-wiring.py on Linux. Actual STA MainWindow construction/option-change probe is tests/LanScope.StartupChecks; cross-build here, run on Windows. Do not claim the Windows startup probe was executed on Linux.

@@ -11,6 +11,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{EE629D8A
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DAS.Checks", "tests\LanScope.Checks\LanScope.Checks.csproj", "{35E27541-4FFD-4D3F-9A6E-29CCA0DC3BA0}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DRAS.StartupChecks", "tests\LanScope.StartupChecks\LanScope.StartupChecks.csproj", "{533C4C2A-0DE5-4DB3-88CA-E3A574B39119}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -28,9 +30,14 @@ Global
 		{35E27541-4FFD-4D3F-9A6E-29CCA0DC3BA0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{35E27541-4FFD-4D3F-9A6E-29CCA0DC3BA0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{35E27541-4FFD-4D3F-9A6E-29CCA0DC3BA0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{533C4C2A-0DE5-4DB3-88CA-E3A574B39119}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{533C4C2A-0DE5-4DB3-88CA-E3A574B39119}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{533C4C2A-0DE5-4DB3-88CA-E3A574B39119}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{533C4C2A-0DE5-4DB3-88CA-E3A574B39119}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{2733C1C0-AD02-40B2-BD9E-9ABFD99BF36F} = {D50C6C63-4E3F-4F73-A58A-592C2E589880}
 		{35E27541-4FFD-4D3F-9A6E-29CCA0DC3BA0} = {EE629D8A-4641-4667-996C-5E381B47BE52}
+		{533C4C2A-0DE5-4DB3-88CA-E3A574B39119} = {EE629D8A-4641-4667-996C-5E381B47BE52}
 	EndGlobalSection
 EndGlobal
