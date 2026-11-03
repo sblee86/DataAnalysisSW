@@ -47,14 +47,15 @@ public sealed class SettingsStore(string? filePath = null, byte[]? policyPublicK
         var plain=Protect(ciphertext,false);
         try {
             var settings=JsonSerializer.Deserialize<WorkspaceSettings>(plain)??throw new InvalidDataException("설정파일이 비어 있습니다.");
-            if(session.Role==UserRole.Admin)foreach(var p in settings.Profiles)IcdProtection.Open(session,p);
+            if(session.Role==UserRole.Admin)foreach(var p in settings.Profiles){IcdProtection.Open(session,p);CapturePolicyAccess.OpenAdmin(session,p);}
             return settings.ForSession(session);
         }finally{CryptographicOperations.ZeroMemory(plain);}
     }
     public void Save(LoginSession session, WorkspaceSettings settings)
     {
         session.RequireAdmin();
-        foreach(var profile in settings.Profiles){IcdProtection.Seal(session,profile);if(settings.GuestIcdAllowList.Contains(profile.IcdId))GuestIcdAccess.Seal(session,profile,guestPublicKey??GuestIcdAccess.EmbeddedPublicKey());else profile.GuestConversionIcd=[];}
+        foreach(var profile in settings.Profiles){IcdProtection.Seal(session,profile);CapturePolicyAccess.Seal(session,profile,guestPublicKey??GuestIcdAccess.EmbeddedPublicKey());if(settings.GuestIcdAllowList.Contains(profile.IcdId))GuestIcdAccess.Seal(session,profile,guestPublicKey??GuestIcdAccess.EmbeddedPublicKey());else profile.GuestConversionIcd=[];}
+        settings.ValidateCaptureConflicts();
         settings.GuestIcdAllowList.RemoveAll(id=>!settings.Profiles.Any(p=>p.IcdId==id));
         var plain=JsonSerializer.SerializeToUtf8Bytes(settings); byte[] encrypted;
         try { encrypted=Protect(plain,true); } finally { CryptographicOperations.ZeroMemory(plain); }

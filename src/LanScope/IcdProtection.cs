@@ -49,7 +49,7 @@ public static class IcdProtection
     {
         admin.RequireAdmin();
         var clone=JsonSerializer.Deserialize<WorkspaceSettings>(JsonSerializer.Serialize(settings))!;
-        foreach(var profile in clone.Profiles)Open(admin,profile);
+        foreach(var profile in clone.Profiles){Open(admin,profile);CapturePolicyAccess.OpenAdmin(admin,profile);}
         return clone;
     }
     // Domain-separated deterministic ECDSA private scalar, never persisted with configuration.

@@ -8,7 +8,7 @@
 
 ## Roles — user clarification supersedes ALL earlier guest recording restrictions
 
-- BOTH admin and guest record ALL frames Npcap delivers on the SAME configured NICs to standard PCAP, including non-IP and unmatched traffic. No ICD permission filter/BPF may discard recording data. NIC configuration selects devices; each NIC still requires at least one interface mapping.
+- LATEST USER REQUIREMENT: both roles record ONLY packets matching IP/direction, user-selected header ID→message, declared length, exact ICD size. No accept-all fallback. See docs/RECORDING-MATCHING.md.
 - All interfaces and their classification counters are visible to both roles. Top counts/bytes measure full NIC records, not sum of overlapping interface matches.
 - ONLY admin adds/edits/deletes interfaces/CSV ICDs/IPs, NIC mappings and output paths.
 - ICD allowlist applies ONLY to PCAP→CSV value conversion. admin converts all; guest converts explicitly allowed ICDs only. Default deny conversion must NEVER disable PCAP collection.
@@ -25,7 +25,7 @@
 
 ## Recording and CSV conversion
 
-- One unique directory per test; one whole-NIC standard PCAP per selected NIC. Interface matches are counters only. Snapshot all original frame bytes before parsing.
+- One unique directory per test; PCAP per NIC→interface. Validate before writing, retain original frame bytes for accepted packets only.
 - CSV service checks permission independently before creating output and rechecks current signed config at job start. Stream complete matching UDP datagrams into values CSV; TCP reassembly/automatic message discrimination/CDR inference are unsupported. Report skips and field decode errors; never fabricate values.
 - Cancellation/failure removes partial temp CSV; never overwrite original PCAP. Keep input and output distinct.
 - Test production domain/crypto/recording/conversion classes via tests/LanScope.Checks; secrets via named test bindings, never printed. Windows-specific checks are skipped explicitly in Linux. Web test script for this revision is /workspace/.setup/verify-v05.cjs.
@@ -81,3 +81,9 @@
 
 - Never attach MainWindow dependent SelectionChanged handlers in XAML: SelectedIndex and item insertion can raise events during InitializeComponent before later HEX tab controls (DecodeGrid etc.) are assigned. Wire all seven handlers once in the constructor AFTER InitializeComponent. Checking only earlier import controls is insufficient.
 - Run python3 tests/check-wpf-event-wiring.py on Linux. Actual STA MainWindow construction/option-change probe is tests/LanScope.StartupChecks; cross-build here, run on Windows. Do not claim the Windows startup probe was executed on Linux.
+
+## User-configured header matching supersedes the old whole-NIC contract
+
+- PacketHeaderMatcher is integrated in NicRecording/CaptureEngine and PCAP→CSV. User selects header.ID and Length from ICD or standalone CSV/C++ header, chooses header inclusion/length basis, sets ID→message mapping. CapturePolicy.Prepare validates header fields against each ICD when included, expected sizes and ID uniqueness. Checksum supports explicit none; UDP only, no fragmentation/TCP reassembly.
+- Policy/header originals are encrypted separately; minimal guest envelope permits valid recording without full ICD disclosure or conversion grants. No policy means start is rejected. Wrong/ambiguous packets never reach PcapFile.Write. Preserve existing credential/key pins.
+- Keep design/header-match.js copied to docs and preview artifacts. Demo uses synthetic PDUs with explicit rules, not real NIC capture. Never invent actual user header offsets.

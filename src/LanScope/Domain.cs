@@ -50,10 +50,13 @@ public sealed class RecordProfile
     public bool Enabled {get;set;}=true;
     [JsonIgnore] public string CatalogLabel=>Name+" · "+(Enabled?"활성":"비활성")+" · "+ByteOrder.ToUpperInvariant();
     public IcdSchema ParseSchema()=>IcdCsv.Parse(IcdContent,ByteOrder,StructSources,StructPack,StructBitOrder);
+    [JsonIgnore] public CapturePolicy? CapturePolicy {get;set;}
+    public byte[] EncryptedCapturePolicy {get;set;}=[];
+    public byte[] GuestCapturePolicy {get;set;}=[];
     public string IcdId {get;set;}="";
     public byte[] EncryptedIcd {get;set;}=[];
     public byte[] GuestConversionIcd {get;set;}=[];
-    public void ClearPlaintext(){CryptographicOperations.ZeroMemory(IcdContent);IcdContent=[];IcdName="";foreach(var source in StructSources)CryptographicOperations.ZeroMemory(source.Content);StructSources=[];}
+    public void ClearPlaintext(){CryptographicOperations.ZeroMemory(IcdContent);IcdContent=[];IcdName="";foreach(var source in StructSources)CryptographicOperations.ZeroMemory(source.Content);StructSources=[];CapturePolicy?.Clear();CapturePolicy=null;}
     public List<string> SenderIps { get; set; } = [];
     public List<string> ReceiverIps { get; set; } = [];
     public bool BothDirections { get; set; } = true;
@@ -100,6 +103,7 @@ public sealed class WorkspaceSettings
             var allowed=profiles.Where(p=>p.Id==profileId&&GuestIcdAllowList.Contains(p.IcdId));
             var denied=profiles.Where(p=>!GuestIcdAllowList.Contains(p.IcdId));
             foreach(var a in allowed)foreach(var d in denied) {
+                if(a.CapturePolicy==null||d.CapturePolicy==null||!a.CapturePolicy.CanOverlap(d.CapturePolicy))continue;
                 foreach(var source in a.SenderIps)foreach(var destination in a.ReceiverIps) {
                     if(IPAddress.TryParse(source,out var src)&&IPAddress.TryParse(destination,out var dst)&&
                       (d.Matches(src,dst)||(a.BothDirections&&d.Matches(dst,src))))return true;
@@ -116,20 +120,26 @@ public sealed class WorkspaceSettings
         var allowed=Profiles.ToList();
         var ids=allowed.Select(p=>p.Id).ToHashSet();
         return new WorkspaceSettings {OutputDirectory=OutputDirectory,GuestIcdAllowList=[..GuestIcdAllowList],
-            Profiles=allowed.Select(p=>new RecordProfile{Id=p.Id,Name=p.Name,Enabled=p.Enabled,ByteOrder=p.ByteOrder,StructPack=p.StructPack,StructBitOrder=p.StructBitOrder,IcdId=p.IcdId,EncryptedIcd=[..p.EncryptedIcd],GuestConversionIcd=[..p.GuestConversionIcd],SenderIps=[..p.SenderIps],ReceiverIps=[..p.ReceiverIps],BothDirections=p.BothDirections}).ToList(),
+            Profiles=allowed.Select(p=>new RecordProfile{Id=p.Id,Name=p.Name,Enabled=p.Enabled,ByteOrder=p.ByteOrder,StructPack=p.StructPack,StructBitOrder=p.StructBitOrder,IcdId=p.IcdId,CapturePolicy=CapturePolicyAccess.OpenGuest(session,p),EncryptedCapturePolicy=[..p.EncryptedCapturePolicy],GuestCapturePolicy=[..p.GuestCapturePolicy],EncryptedIcd=[..p.EncryptedIcd],GuestConversionIcd=[..p.GuestConversionIcd],SenderIps=[..p.SenderIps],ReceiverIps=[..p.ReceiverIps],BothDirections=p.BothDirections}).ToList(),
             Bindings=Bindings.Select(b=>new NicBinding{DeviceId=b.DeviceId,DeviceName=b.DeviceName,ProfileIds=b.ProfileIds.Where(ids.Contains).ToList()}).Where(b=>b.ProfileIds.Count>0).ToList()};
     }
     public void ClearPlaintext(){foreach(var p in Profiles)p.ClearPlaintext();}
 
+    public void ValidateCaptureConflicts()
+    {
+        foreach(var binding in Bindings){var profiles=Profiles.Where(p=>p.Enabled&&p.CapturePolicy!=null&&binding.ProfileIds.Contains(p.Id)).ToArray();for(int i=0;i<profiles.Length;i++)for(int j=i+1;j<profiles.Length;j++){var a=profiles[i];var b=profiles[j];bool endpoints=a.SenderIps.Any(src=>a.ReceiverIps.Any(dst=>IPAddress.TryParse(src,out var s)&&IPAddress.TryParse(dst,out var d)&&(b.Matches(s,d)||a.BothDirections&&b.Matches(d,s))));if(endpoints&&a.CapturePolicy!.CanOverlap(b.CapturePolicy!))throw new ArgumentException($"{binding.DeviceName}: {a.Name} / {b.Name}의 IP·ID·길이 규칙이 중복되어 구별할 수 없습니다.");}}
+    }
     public void ValidateForRecording(IReadOnlyCollection<string> available)
     {
         if(string.IsNullOrWhiteSpace(OutputDirectory)||!Path.IsPathFullyQualified(OutputDirectory)) throw new ArgumentException("기록 폴더를 절대 경로로 지정하세요.");
         if(Bindings.Count==0) throw new ArgumentException("NIC에 프로파일을 1개 이상 매칭하세요.");
         if(Bindings.Select(x=>x.DeviceId).Distinct().Count()!=Bindings.Count) throw new ArgumentException("NIC 매칭이 중복되었습니다.");
+        ValidateCaptureConflicts();
         foreach(var b in Bindings) {
             if(!available.Contains(b.DeviceId)) throw new ArgumentException($"NIC을 사용할 수 없습니다: {b.DeviceName}");
             if(b.ProfileIds.Count==0 || b.ProfileIds.Distinct().Count()!=b.ProfileIds.Count) throw new ArgumentException("각 NIC에는 중복 없이 프로파일을 1개 이상 선택해야 합니다.");
-            foreach(var id in b.ProfileIds) (Profiles.SingleOrDefault(p=>p.Id==id)??throw new ArgumentException("삭제된 프로파일 매칭입니다.")).ValidateEndpoints();
+            foreach(var id in b.ProfileIds){var p=Profiles.SingleOrDefault(p=>p.Id==id)??throw new ArgumentException("삭제된 프로파일 매칭입니다.");p.ValidateEndpoints();if(p.Enabled){if(p.CapturePolicy==null)throw new ArgumentException(p.Name+": 공통헤더 ID·Length와 메시지 ID 매핑을 지정하세요.");p.CapturePolicy.CreateMatcher(p);}}
+            if(!Profiles.Any(p=>p.Enabled&&b.ProfileIds.Contains(p.Id)))throw new ArgumentException("NIC에 활성 인터페이스가 없습니다.");
         }
     }
 }

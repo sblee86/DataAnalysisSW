@@ -5,7 +5,7 @@ using System.Text;
 namespace LanScope;
 internal static class GuestIcdAccess
 {
-    private static ECDiffieHellman Recipient(LoginSession session)
+    internal static ECDiffieHellman Recipient(LoginSession session)
     {
         var d=HMACSHA256.HashData(session.SessionKey,Encoding.UTF8.GetBytes("LANscope guest CSV recipient v1"));d[0]&=0x7f;if(d.All(b=>b==0))d[^1]=1;
         try{return ECDiffieHellman.Create(new ECParameters{Curve=ECCurve.NamedCurves.nistP256,D=d});}finally{CryptographicOperations.ZeroMemory(d);}

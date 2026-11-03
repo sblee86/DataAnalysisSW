@@ -38,7 +38,10 @@ public sealed class CaptureEngine : IDisposable
     public string SessionDirectory {get;private set;}="";
     public string LastError {get;private set;}="";
     public string DriverSummary {get;private set;}="";
-    public long ObservedFrames {get{lock(gate)return recordings.Values.Sum(r=>r.Total.Packets);}}
+    public long ObservedFrames {get{lock(gate)return recordings.Values.Sum(r=>r.Observed.Packets);}}
+    public long RecordedFrames {get{lock(gate)return recordings.Values.Sum(r=>r.Total.Packets);}}
+    public long RejectedFrames {get{lock(gate)return recordings.Values.Sum(r=>r.Rejected);}}
+    public string RejectionSummary {get{lock(gate)return string.Join(" · ",recordings.Values.SelectMany(r=>r.RejectionReasons).GroupBy(r=>r.Key).Select(g=>$"{g.Key} {g.Sum(x=>x.Value):N0}"));}}
     public long RecordedBytes {get{lock(gate)return recordings.Values.Sum(r=>r.Total.Bytes);}}
     public long ParseFailures {get{lock(gate)return recordings.Values.Sum(r=>r.ParseFailures);}}
     public void Start(LoginSession session,WorkspaceSettings settings,List<LibPcapLiveDevice> available,string testName)
@@ -59,7 +62,7 @@ public sealed class CaptureEngine : IDisposable
                 device.Open(new DeviceConfiguration {Mode=DeviceModes.Promiscuous,ReadTimeout=250,Snaplen=65535});
                 var profiles=binding.ProfileIds.Select(id=>settings.Profiles.Single(p=>p.Id==id)).ToList();
                 recordings.Add(device.Name,new NicRecording(Path.Combine(SessionDirectory,$"nic{opened.Count:D2}.pcap"),binding.DeviceName,device.LinkType,profiles,device.Name));
-                // No ICD/IP BPF: both roles persist ALL frames delivered by each selected NIC.
+                // Software validation runs before any PCAP write; both roles use the same header/ID/size rules.
                 device.OnPacketArrival+=PacketArrival;
             }
             WriteManifest(SessionDirectory,session,settings,testName);
@@ -74,8 +77,8 @@ public sealed class CaptureEngine : IDisposable
         int index=0;
         foreach(var b in settings.Bindings) {
             index++;w.Write(b.DeviceId);w.Write(b.DeviceName);w.Write(b.ProfileIds.Count);
-            foreach(var id in b.ProfileIds) {
-                var p=settings.Profiles.Single(x=>x.Id==id);w.Write(p.Id);w.Write(p.Name);w.Write($"nic{index:D2}.pcap");
+            int profileIndex=0;foreach(var id in b.ProfileIds) {
+                var p=settings.Profiles.Single(x=>x.Id==id);w.Write(p.Id);w.Write(p.Name);w.Write(NicRecording.ProfilePath($"nic{index:D2}.pcap",profileIndex++));
                 w.Write(p.IcdId); // Reference only. No CSV filename, schema, raw ICD or encryption keys.
             }
         }

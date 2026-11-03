@@ -11,6 +11,10 @@
     <Compile Include="../../src/LanScope/IcdBundle.cs" Link="IcdBundle.cs" />
     <Compile Include="../../src/LanScope/CppStructExport.cs" Link="CppStructExport.cs" />
     <Compile Include="../../src/LanScope/IcdExport.cs" Link="IcdExport.cs" />
+    <Compile Include="../../src/LanScope/CapturePolicy.cs" Link="CapturePolicy.cs" />
+    <Compile Include="../../src/LanScope/CapturePolicyAccess.cs" Link="CapturePolicyAccess.cs" />
+    <Compile Include="../../src/LanScope/ValidatedDatagram.cs" Link="ValidatedDatagram.cs" />
+    <Compile Include="../../src/LanScope/PacketHeaderMatcher.cs" Link="PacketHeaderMatcher.cs" />
     <Compile Include="../../src/LanScope/IcdCsv.cs" Link="IcdCsv.cs" />
     <Compile Include="../../src/LanScope/SettingsStore.cs" Link="SettingsStore.cs" />
     <Compile Include="../../src/LanScope/CaptureEngine.cs" Link="CaptureEngine.cs" />

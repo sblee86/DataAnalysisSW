@@ -8,6 +8,8 @@ using SharpPcap.LibPcap;
 int checks=0;
 void Check(bool condition,string label) {if(!condition)throw new Exception("FAIL: "+label);checks++;Console.WriteLine("PASS: "+label);}
 void Throws(Action action,string label) {try{action();}catch(ArgumentException){Check(true,label);return;}throw new Exception("FAIL: "+label);}
+CapturePolicy FixturePolicy(IcdSchema schema){var id=new IcdField("Header","ID",0,0,8,"uint","be","msb0",1,0,"","",0);var length=id with{Name="Length",ByteOffset=1};var policy=new CapturePolicy{IdField=id,LengthField=length,HeaderFields=[id,length],HeaderBytes=4,SeparateHeader=true,IcdIncludesHeader=false,Messages=schema.Messages.Select((m,i)=>new CaptureMessageRule(m,(i+1).ToString())).ToList()};policy.Prepare(schema);return policy;}
+byte[] UdpFrame(byte[] reference,byte[] payload){var bytes=reference.Take(42).Concat(payload).ToArray();int total=28+payload.Length;bytes[16]=(byte)(total>>8);bytes[17]=(byte)total;int udp=8+payload.Length;bytes[38]=(byte)(udp>>8);bytes[39]=(byte)udp;return bytes;}
 var root=Path.GetFullPath(args[0]);
 var auth=new AccountService(File.ReadAllBytes(Path.Combine(root,"src/LanScope/Resources/accounts.bin")));
 Check(auth.Login("admin","wrong")==null,"invalid password rejected");
@@ -47,7 +49,7 @@ var v6=new RecordProfile {SenderIps=["2001:db8::1"],ReceiverIps=["2001:db8::2"]}
 var invalid=new RecordProfile {Name="Bad",IcdName="Bad.csv",IcdContent=File.ReadAllBytes(Path.Combine(root,"samples/Telemetry.csv")),SenderIps=["bad-ip"],ReceiverIps=["198.51.100.2"]};Throws(invalid.Validate,"invalid endpoint rejected");
 var settings=new WorkspaceSettings {OutputDirectory=Path.GetTempPath(),Profiles=[p]};Throws(()=>settings.ValidateForRecording(["nic1"]),"no NIC mapping rejected");
 settings.Bindings.Add(new NicBinding {DeviceId="nic1",DeviceName="Test NIC",ProfileIds=[]});Throws(()=>settings.ValidateForRecording(["nic1"]),"NIC requires at least one profile");
-settings.Bindings[0].ProfileIds.Add(p.Id);settings.ValidateForRecording(["nic1"]);Check(true,"valid NIC mapping");
+settings.Bindings[0].ProfileIds.Add(p.Id);p.CapturePolicy=FixturePolicy(p.ParseSchema());settings.ValidateForRecording(["nic1"]);Check(true,"valid NIC mapping");
 Throws(()=>settings.ValidateForRecording(["nic2"]),"disconnected NIC rejected");
 settings.Bindings[0].ProfileIds.Add("missing");Throws(()=>settings.ValidateForRecording(["nic1"]),"stale profile ID rejected");settings.Bindings[0].ProfileIds.Remove("missing");
 var counter=new PacketCounter();counter.Add(46,DateTime.UtcNow);counter.Add(90,DateTime.UtcNow);Check(counter.Packets==2&&counter.Bytes==136&&counter.MinSize==46&&counter.MaxSize==90&&counter.Average==68,"packet size statistics");
@@ -98,7 +100,7 @@ Check(guestView.Profiles[0].IcdContent.Length==0&&guestView.Profiles[0].IcdName=
 var hidden=new RecordProfile{Name="Hidden ICD",IcdName="Hidden.csv",IcdContent=Encoding.UTF8.GetBytes("name,byte_offset,bit_length,type\nsecret,0,8,uint"),SenderIps=["203.0.113.1"],ReceiverIps=["203.0.113.2"]};IcdProtection.Seal(admin!,hidden);settings.Profiles.Add(hidden);settings.Bindings[0].ProfileIds.Add(hidden.Id);
 Check(settings.ForSession(guest!).Profiles.Any(x=>x.Id==hidden.Id),"CSV-restricted interface remains visible for PCAP recording");
 hidden.SenderIps=[..p.SenderIps];hidden.ReceiverIps=[..p.ReceiverIps];
-Check(settings.HasGuestConversionConflict(p.Id),"same-endpoint mixed ICDs affect CSV conversion only");
+Check(!settings.HasGuestConversionConflict(p.Id),"same IP alone is not a message identity or header conflict");
 Throws(()=>new CaptureEngine().Start(guest!,settings,[],"Unavailable"),"guest capture checks NIC availability, not CSV permissions");
 settings.GuestIcdAllowList.Remove(p.IcdId);Check(settings.ForSession(guest!).Profiles.Count==2,"revoking CSV grant does not hide or disable PCAP recording");
 var held=p.IcdContent;p.ClearPlaintext();Check(held.All(b=>b==0),"plaintext buffer is zeroed when clearing workspace");IcdProtection.Open(admin!,p);
@@ -120,22 +122,23 @@ try {
 }finally{Directory.Delete(legacyDirectory,true);}
 var conversionDirectory=Path.Combine(Path.GetTempPath(),"lanscope-convert-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(conversionDirectory);
 try {
- var convertProfile=new RecordProfile{Name="Convert A",IcdName="private.csv",IcdContent=Encoding.UTF8.GetBytes("name,byte_offset,bit_length,type\nvalue,0,8,uint"),SenderIps=["192.0.2.1"],ReceiverIps=["198.51.100.2"]};IcdProtection.Seal(admin!,convertProfile);
+ var convertProfile=new RecordProfile{Name="Convert A",IcdName="private.csv",IcdContent=Encoding.UTF8.GetBytes("name,byte_offset,bit_length,type\nvalue,0,8,uint"),SenderIps=["192.0.2.1"],ReceiverIps=["198.51.100.2"]};convertProfile.CapturePolicy=FixturePolicy(convertProfile.ParseSchema());IcdProtection.Seal(admin!,convertProfile);CapturePolicyAccess.Seal(admin!,convertProfile,GuestIcdAccess.PublicKey(guest!));
  var csvSettings=new WorkspaceSettings{OutputDirectory=conversionDirectory,Profiles=[convertProfile],Bindings=[new NicBinding{DeviceId="nic",DeviceName="NIC",ProfileIds=[convertProfile.Id]}]};
  string input=Path.Combine(conversionDirectory,"all.pcap"),csv=Path.Combine(conversionDirectory,"values.csv");
- var unrelated=frame.ToArray();unrelated[29]=99;
+ var convertFrame=UdpFrame(frame,new byte[]{1,5,0,0,84});
+ var unrelated=convertFrame.ToArray();unrelated[29]=99;
  var arp=Convert.FromHexString("FFFFFFFFFFFF00112233445508060001080006040001001122334455C0000201000000000000C0000202");
  using(var recording=new NicRecording(input,"NIC",LinkLayers.Ethernet,[convertProfile])) {
-  recording.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,1),frame));recording.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,2),unrelated));recording.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,3),arp));recording.Flush();
-  Check(recording.Total.Packets==3&&recording.Snapshot("stopped").Single().Packets==1,"NIC PCAP includes matching, unrelated and ARP frames; interface counters remain separate");
+  recording.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,1),convertFrame));recording.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,2),unrelated));recording.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,3),arp));recording.Flush();
+  Check(recording.Total.Packets==1&&recording.Observed.Packets==3&&recording.Rejected==2&&recording.Snapshot("stopped").Single().Packets==1,"only IP/header/length-valid frame saved; unrelated and ARP frames rejected");
  }
- using(var reader=new CaptureFileReaderDevice(input)){reader.Open();int count=0;while(reader.GetNextPacket(out _)==GetPacketStatus.PacketRead)count++;Check(count==3,"whole NIC standard PCAP contains every received frame");}
+ using(var reader=new CaptureFileReaderDevice(input)){reader.Open();int count=0;while(reader.GetNextPacket(out _)==GetPacketStatus.PacketRead)count++;Check(count==1,"interface PCAP excludes unrelated frames");}
  Denied(()=>PcapCsvConverter.Messages(guest!,csvSettings,convertProfile.Id),"guest CSV conversion denied by default while recording remains available");
  Denied(()=>PcapCsvConverter.Convert(guest!,csvSettings,convertProfile.Id,"Default",input,csv),"conversion service rejects forbidden ICD before output creation");Check(!File.Exists(csv),"denied conversion leaves no CSV file");
  csvSettings.GuestIcdAllowList.Add(convertProfile.IcdId);GuestIcdAccess.Seal(admin!,convertProfile,GuestIcdAccess.PublicKey(guest!));
  Check(PcapCsvConverter.Messages(guest!,csvSettings,convertProfile.Id).SequenceEqual(new[]{"Default"}),"authorized guest can use encrypted ICD for conversion without admin key");
  var result=PcapCsvConverter.Convert(guest!,csvSettings.ForSession(guest!),convertProfile.Id,"Default",input,csv);var text=File.ReadAllText(csv);
- Check(result.Frames==3&&result.Rows==1&&result.Skipped==2&&text.Contains("\"84\""),"allowed guest PCAP to CSV decodes UDP value and skips unrelated/ARP frames");
+ Check(result.Frames==1&&result.Rows==1&&result.Skipped==0&&text.Contains("\"84\""),"allowed guest PCAP to CSV decodes UDP value and skips unrelated/ARP frames");
  File.Delete(csv);csvSettings.GuestIcdAllowList.Clear();Denied(()=>PcapCsvConverter.Convert(guest!,csvSettings,convertProfile.Id,"Default",input,csv),"revoked CSV permission checked on each conversion");
  var adminResult=PcapCsvConverter.Convert(admin!,csvSettings,convertProfile.Id,"Default",input,csv);Check(adminResult.Rows==1,"admin converts all interfaces without guest grants");
  Throws(()=>PcapCsvConverter.Convert(admin!,csvSettings,convertProfile.Id,"Default",input,input),"conversion cannot overwrite original PCAP");
@@ -245,10 +248,11 @@ var layoutFolder=Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString("N"));t
 var bundleRecordingDirectory=Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString("N"));Directory.CreateDirectory(bundleRecordingDirectory);
 try {
  bundled.ReceiverIps=["198.51.100.2"];bundled.Enabled=true;var complete=frame.Take(42).Concat(new byte[13]).ToArray();complete[16]=0;complete[17]=41;complete[38]=0;complete[39]=21;complete[42]=7;complete[43]=0x34;complete[44]=0x12;
+ bundled.CapturePolicy=FixturePolicy(bundled.ParseSchema());CapturePolicyAccess.Seal(admin!,bundled,GuestIcdAccess.PublicKey(guest!));complete=UdpFrame(frame,new byte[]{1,17,0,0}.Concat(complete.Skip(42)).ToArray());
  var input=Path.Combine(bundleRecordingDirectory,"struct.pcap");using(var writer=new NicRecording(input,"NIC",LinkLayers.Ethernet,[bundled])){writer.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,1),complete));}
  enabledSettings.GuestIcdAllowList=[bundled.IcdId];var structOutput=Path.Combine(bundleRecordingDirectory,"struct.csv");var converted=PcapCsvConverter.Convert(guest!,enabledSettings.ForSession(guest!),bundled.Id,"Envelope",input,structOutput);Check(converted.Rows==1&&File.ReadAllText(structOutput).Contains("\"4660\""),"guest PCAP CSV conversion uses sealed external struct and little endian options");
- bundled.Enabled=false;using(var writer=new NicRecording(Path.Combine(bundleRecordingDirectory,"inactive.pcap"),"NIC",LinkLayers.Ethernet,[bundled])){writer.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,2),complete));Check(writer.Total.Packets==1&&writer.Snapshot("recording").Single().Packets==0,"inactive ICD still retains whole NIC PCAP frames");}
- using(var reader=new CaptureFileReaderDevice(Path.Combine(bundleRecordingDirectory,"inactive.pcap"))){reader.Open();Check(reader.GetNextPacket(out var captured)==GetPacketStatus.PacketRead&&captured.GetPacket().Data.SequenceEqual(complete),"inactive ICD standard PCAP frame bytes unchanged");}
+ bundled.Enabled=false;using(var writer=new NicRecording(Path.Combine(bundleRecordingDirectory,"inactive.pcap"),"NIC",LinkLayers.Ethernet,[bundled])){writer.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,2),complete));Check(writer.Total.Packets==0&&writer.Observed.Packets==1&&writer.Snapshot("recording").Single().Packets==0,"inactive ICD packets are not recorded");}
+ Check(!File.Exists(Path.Combine(bundleRecordingDirectory,"inactive.pcap")),"inactive ICD creates no packet file");
 }finally{Directory.Delete(bundleRecordingDirectory,true);bundled.ClearPlaintext();}
 var aliasLayout=CStructParser.Parse([new("alias.h",Encoding.UTF8.GetBytes("struct Value { uint16_t number; }; typedef struct Value Value; typedef struct Value Alias; struct Packet { Alias item; };"))]);Check(aliasLayout["Packet"].Size==2,"common typedef struct tag aliases supported");
 // Explicit administrator ICD export / Excel edit / reimport.
@@ -297,4 +301,58 @@ try {
  savedCredential[^1]^=1;File.WriteAllBytes(credentialPath,savedCredential);CryptoRejected(()=>credentials.Login("admin",newPassword),"tampered password envelope rejected");
 }finally{Directory.Delete(credentialDir,true);}
 var newLayoutPath=Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString("N"),"ui.bin");try{var prefs=new UiPreferences(newLayoutPath);var customized=new UiLayoutOptions(TestNameFont:28,TestNameWidth:740,TestNameHeight:120);prefs.SaveLayout(customized);Check(prefs.LoadLayout()==customized,"record name font and resize settings roundtrip");}finally{Directory.Delete(Path.GetDirectoryName(newLayoutPath)!,true);}
+// Illustrative protocol only: these positions/IDs are NOT the user's real common header.
+var headerSchema=Parse("message,name,byte_offset,bit_length,type\nMessageA,value,0,16,uint\nMessageB,value,0,32,uint");
+var headerProfile=new RecordProfile{Name="Header test",SenderIps=["192.0.2.1"],ReceiverIps=["198.51.100.2"],BothDirections=false};
+var sourceIp=IPAddress.Parse("192.0.2.1");var destinationIp=IPAddress.Parse("198.51.100.2");
+var messageIdField=new IcdField("Header","id",0,0,16,"uint","be","msb0",1,0,"","",0);
+var messageLengthField=messageIdField with{Name="length",ByteOffset=2};
+var matcher=new PacketHeaderMatcher(headerProfile,headerSchema,messageIdField,messageLengthField,[new(0x1001,"MessageA"),new(0x1002,"MessageB")],0,4);
+Check(matcher.Match(sourceIp,destinationIp,Convert.FromHexString("100100061234")).Message=="MessageA","IP then common-header ID and exact lengths identify ICD message");
+Check(matcher.Match(destinationIp,sourceIp,Convert.FromHexString("100100061234")).Failure==PacketMatchFailure.EndpointMismatch,"wrong direction rejected before header parsing");
+Check(matcher.Match(destinationIp,sourceIp,[]).Failure==PacketMatchFailure.EndpointMismatch,"unrelated IP rejected even with empty PDU");
+Check(matcher.Match(sourceIp,destinationIp,[0x10]).Failure==PacketMatchFailure.TruncatedHeader,"truncated common header rejected");
+Check(matcher.Match(sourceIp,destinationIp,Convert.FromHexString("FFFF00061234")).Failure==PacketMatchFailure.UnknownMessageId,"unknown message ID rejected");
+Check(matcher.Match(sourceIp,destinationIp,Convert.FromHexString("100100071234")).Failure==PacketMatchFailure.LengthMismatch,"declared header length must match actual PDU length");
+Check(matcher.Match(sourceIp,destinationIp,Convert.FromHexString("100200061234")).Failure==PacketMatchFailure.IcdSizeMismatch,"matching header length still rejected when ICD body size differs");
+Check(matcher.Match(sourceIp,destinationIp,Convert.FromHexString("10010007123400")).Failure==PacketMatchFailure.IcdSizeMismatch,"extra trailing bytes rejected rather than partially decoded");
+var bodyLengthMatcher=new PacketHeaderMatcher(headerProfile,headerSchema,messageIdField,messageLengthField,[new(0x1001,"MessageA")],4,4);
+Check(bodyLengthMatcher.Match(sourceIp,destinationIp,Convert.FromHexString("100100021234")).Accepted,"explicit length basis supports body-only declared size");
+var littleMatcher=new PacketHeaderMatcher(headerProfile,headerSchema,messageIdField with{Endian="le"},messageLengthField with{Endian="le"},[new(0x1001,"MessageA")],0,4);
+Check(littleMatcher.Match(sourceIp,destinationIp,Convert.FromHexString("011006001234")).Accepted,"explicit little-endian common header matching");
+Throws(()=>new PacketHeaderMatcher(headerProfile,headerSchema,messageIdField,messageLengthField,[new(0x1001,"MessageA"),new(0x1001,"MessageB")],0,4),"ambiguous ID-to-message mapping rejected at configuration time");
+Throws(()=>new PacketHeaderMatcher(headerProfile,headerSchema,messageIdField,messageIdField,[new(0x1001,"MessageA")],0,4),"overlapping ID and length fields rejected");
+var strictDir=Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString("N"));Directory.CreateDirectory(strictDir);
+try {
+ RecordProfile StrictProfile(string name,string message,int bits,int id){var q=new RecordProfile{Name=name,IcdName="strict.csv",IcdContent=Encoding.UTF8.GetBytes($"message,name,byte_offset,bit_length,type\n{message},value,0,{bits},uint"),SenderIps=["192.0.2.1"],ReceiverIps=["198.51.100.2"]};q.CapturePolicy=FixturePolicy(q.ParseSchema());q.CapturePolicy.Messages[0]=q.CapturePolicy.Messages[0] with{Id=id.ToString()};q.CapturePolicy.Prepare(q.ParseSchema());IcdProtection.Seal(admin!,q);CapturePolicyAccess.Seal(admin!,q,GuestIcdAccess.PublicKey(guest!));return q;}
+ var qa=StrictProfile("A","A",8,1);var qb=StrictProfile("B","B",16,2);var rawA=UdpFrame(frame,new byte[]{1,5,0,0,84});var rawB=UdpFrame(frame,new byte[]{2,6,0,0,0x12,0x34});
+ var strictPath=Path.Combine(strictDir,"nic.pcap");
+ using(var recorder=new NicRecording(strictPath,"NIC",LinkLayers.Ethernet,[qa,qb])){
+  var packets=new[]{rawA,rawB,UdpFrame(frame,new byte[]{9,5,0,0,84}),UdpFrame(frame,new byte[]{1,6,0,0,84}),UdpFrame(frame,new byte[]{2,5,0,0,84})};
+  foreach(var bytes in packets)recorder.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,10),bytes));
+  var wrongIp=rawA.ToArray();wrongIp[29]=99;recorder.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,10),wrongIp));
+  var truncated=rawA[..^1];recorder.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,10),truncated));
+  var fragment=rawA.ToArray();fragment[20]=0x20;recorder.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,10),fragment));
+  Check(recorder.Observed.Packets==8&&recorder.Total.Packets==2&&recorder.Rejected==6,"strict recording excludes wrong IP/ID/header length/ICD size/truncation/fragments before PCAP write");
+  Check(recorder.Snapshot("recording").All(r=>r.Packets==1),"shared endpoints route unique IDs to separate profile counters");
+ }
+ using(var reader=new CaptureFileReaderDevice(strictPath)){reader.Open();Check(reader.GetNextPacket(out var packet)==GetPacketStatus.PacketRead&&packet.GetPacket().Data.SequenceEqual(rawA)&&reader.GetNextPacket(out _)==GetPacketStatus.NoRemainingPackets,"profile A PCAP contains exactly its validated original frame");}
+ using(var reader=new CaptureFileReaderDevice(NicRecording.ProfilePath(strictPath,1))){reader.Open();Check(reader.GetNextPacket(out var packet)==GetPacketStatus.PacketRead&&packet.GetPacket().Data.SequenceEqual(rawB)&&reader.GetNextPacket(out _)==GetPacketStatus.NoRemainingPackets,"profile B PCAP contains only ID B data");}
+ var collision=StrictProfile("Collision","Collision",8,1);using(var recorder=new NicRecording(Path.Combine(strictDir,"ambiguous.pcap"),"NIC",LinkLayers.Ethernet,[qa,collision])){recorder.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,11),rawA));Check(recorder.Total.Packets==0&&recorder.Rejected==1,"ambiguous interface match records neither profile");}
+ var conflicting=new WorkspaceSettings{Profiles=[qa,collision],Bindings=[new NicBinding{DeviceId="nic",DeviceName="NIC",ProfileIds=[qa.Id,collision.Id]}]};Throws(conflicting.ValidateCaptureConflicts,"overlapping IP/header ID/length policies rejected before configuration commit");
+ var distinct=new WorkspaceSettings{Profiles=[qa,qb],Bindings=[new NicBinding{DeviceId="nic",DeviceName="NIC",ProfileIds=[qa.Id,qb.Id]}]};distinct.ValidateCaptureConflicts();Check(true,"same endpoints with distinct header IDs remain valid");
+ var guestA=new WorkspaceSettings{Profiles=[qa,qb],GuestIcdAllowList=[]}.ForSession(guest!);Check(guestA.Profiles.All(q=>q.CapturePolicy!=null&&q.IcdContent.Length==0&&q.CapturePolicy.HeaderSources.Count==0),"guest gets encrypted minimal matching rules without ICD source or conversion grants");
+ using(var recorder=new NicRecording(Path.Combine(strictDir,"guest.pcap"),"NIC",LinkLayers.Ethernet,guestA.Profiles)){recorder.Write(new RawCapture(LinkLayers.Ethernet,new PosixTimeval(1700000000,12),rawB));Check(recorder.Total.Packets==1,"guest records valid restricted ICD even without CSV conversion grant");}
+ var conversionSettings=new WorkspaceSettings{Profiles=[qa,qb],GuestIcdAllowList=[qa.IcdId]};GuestIcdAccess.Seal(admin!,qa,GuestIcdAccess.PublicKey(guest!));
+ var mixedPath=Path.Combine(strictDir,"legacy-mixed.pcap");using(var writer=new PcapFile(mixedPath,LinkLayers.Ethernet)){foreach(var bytes in new[]{rawA,rawB,UdpFrame(frame,new byte[]{1,6,0,0,84})})writer.Write(bytes,1700000000,13);}
+ var converted=PcapCsvConverter.Convert(guest!,conversionSettings.ForSession(guest!),qa.Id,"A",mixedPath,Path.Combine(strictDir,"only-a.csv"));Check(converted.Rows==1&&converted.Skipped==2,"CSV conversion rechecks header ID and both lengths on old mixed PCAP");
+ var secretSource=new StructSource("private-common.h",Encoding.UTF8.GetBytes("struct PrivateCommon { uint8_t ID; uint8_t Length; uint16_t reserved; };"));qa.CapturePolicy!.HeaderSources=[secretSource];CapturePolicyAccess.Seal(admin!,qa,GuestIcdAccess.PublicKey(guest!));
+ Check(!Encoding.UTF8.GetString(qa.EncryptedCapturePolicy).Contains("PrivateCommon")&&!System.Text.Json.JsonSerializer.Serialize(qa).Contains("private-common.h"),"header source names/definitions remain encrypted in configuration");
+ var minimal=CapturePolicyAccess.OpenGuest(guest!,qa)!;Check(minimal.HeaderSources.Count==0&&minimal.IdField!.Name=="ID","guest matching envelope excludes original header bytes");
+ qa.CapturePolicy=null;CapturePolicyAccess.OpenAdmin(admin!,qa);Check(qa.CapturePolicy!.HeaderSources[0].Content.SequenceEqual(secretSource.Content),"admin reopens encrypted standalone header definitions");
+ var includeSchema=Parse("message,name,byte_offset,bit_length,type\nM,ID,0,8,uint\nM,Length,1,8,uint\nM,value,2,16,uint");var includePolicy=FixturePolicy(includeSchema);includePolicy.IcdIncludesHeader=true;includePolicy.HeaderBytes=2;includePolicy.HeaderFields=includeSchema.Fields.Take(2).ToList();includePolicy.IdField=includeSchema.Fields[0];includePolicy.LengthField=includeSchema.Fields[1];includePolicy.Prepare(includeSchema);Check(includePolicy.Messages[0].BodyBytes==4,"selected header.ID and header.Length verified against ICD layout");
+ var mismatched=includePolicy.Clone();mismatched.HeaderFields[0]=mismatched.HeaderFields[0] with{BitLength=16};Throws(()=>mismatched.Prepare(includeSchema),"standalone header mismatching ICD fields rejected before saving");
+ var unconfigured=new RecordProfile{Name="No header",IcdName="no.csv",IcdContent=Encoding.UTF8.GetBytes("name,byte_offset,bit_length,type\nx,0,8,uint"),SenderIps=["192.0.2.1"],ReceiverIps=["198.51.100.2"]};Throws(()=>new NicRecording(Path.Combine(strictDir,"no-policy.pcap"),"NIC",LinkLayers.Ethernet,[unconfigured]),"missing header policy never falls back to whole-NIC recording");
+}finally{Directory.Delete(strictDir,true);}
+var signedHeaderSchema=Parse("message,name,byte_offset,bit_length,type\nS,ID,0,8,int\nS,Length,1,8,uint\nS,value,2,8,uint");var signedPolicy=new CapturePolicy{IdField=signedHeaderSchema.Fields[0] with{Endian="le"},LengthField=signedHeaderSchema.Fields[1],HeaderFields=[signedHeaderSchema.Fields[0] with{Endian="le"},signedHeaderSchema.Fields[1]],HeaderBytes=2,IcdIncludesHeader=true,Messages=[new("S","0xFF")]};signedPolicy.Prepare(signedHeaderSchema);Check(signedPolicy.CreateMatcher(headerProfile).Match(sourceIp,destinationIp,Convert.FromHexString("FF0354")).Accepted,"signed header declaration uses raw ID bits and single-byte endian is equivalent");
 Console.WriteLine($"{checks} meaningful checks passed. Windows DPAPI/WPF/live NIC tests remain Windows-only.");
