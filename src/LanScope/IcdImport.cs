@@ -4,6 +4,13 @@ namespace LanScope;
 /// <summary>Build a validated editor candidate before replacing any current source.</summary>
 public static class IcdImport
 {
+    public static byte[] DeleteMessage(IcdSchema schema,string message)
+    {
+        if(!schema.Messages.Contains(message))throw new ArgumentException("삭제할 메시지를 선택하세요.");
+        var result=new IcdSchema();result.Fields.AddRange(schema.Fields.Where(f=>f.Message!=message));if(result.Fields.Count==0)return [];
+        foreach(var m in result.Messages)result.MessageSizes[m]=schema.RequiredBytes(m);
+        var bytes=IcdExport.CsvSchema(result);IcdCsv.Parse(bytes);return bytes;
+    }
     public static byte[] Merge(IcdSchema current,IcdSchema incoming)
     {
         var combined=new IcdSchema();combined.Fields.AddRange(current.Fields);combined.Fields.AddRange(incoming.Fields);

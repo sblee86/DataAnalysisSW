@@ -37,6 +37,7 @@ public partial class MainWindow : Window
         StructBitBox.SelectionChanged+=IcdOptionChanged;
         CurrentMessageBox.SelectionChanged+=CurrentMessageChanged;
         RangeFieldBox.SelectionChanged+=RangeFieldChanged;
+        IcdFields.SelectionChanged+=IcdFieldSelected;
         MessageBoxSelect.SelectionChanged+=WriteMessageSelected;
         NicGrid.SelectionChanged+=NicSelected;
         ApplyUiLayout(uiPreferences.LoadLayout(),false);UpdateNavColors("dashboard");SampleBox.ItemsSource=sampleNames;SampleBox.SelectedIndex=0;
@@ -174,12 +175,12 @@ public partial class MainWindow : Window
     private void ProfilesClick(object sender,RoutedEventArgs e){if(AdminAction())ShowPage("profiles");}
     private void SettingsClick(object sender,RoutedEventArgs e){if(AdminAction())ShowPage("settings");}
     private void ClearPendingImports(){pendingCsv=[];pendingCsvName="";pendingHeaders=[];PendingCsvText.Text="선택 대기 CSV 없음";PendingHeaderText.Text="선택 대기 헤더 없음";}
-    private void NewEditor(){ClearPendingImports();selectedCapturePolicy=null;MatchingSummary.Text="공통헤더 규칙 미설정 · 기록 시작 전 ID/Length와 메시지 ID를 지정하세요.";editingProfileId=null;ProfileNameBox.Text="";SenderBox.Text="";ReceiverBox.Text="";selectedIcd=[];selectedIcdName="";selectedStructs=[];ByteOrderBox.SelectedIndex=0;StructPackBox.SelectedIndex=0;StructBitBox.SelectedIndex=0;IcdEnabledBox.IsChecked=true;IcdText.Text="선택된 CSV 없음";currentSchema=null;IcdFields.ItemsSource=null;CurrentMessageBox.ItemsSource=null;RangeFieldBox.ItemsSource=null;DecodeGrid.ItemsSource=null;MessageBoxSelect.ItemsSource=null;WriteFieldBox.ItemsSource=null;WriteValueBox.Text="0";WriteRawBox.IsChecked=false;BothDirectionsBox.IsChecked=true;GuestIcdAllowedBox.IsChecked=false;}
+    private void NewEditor(){ClearPendingImports();selectedCapturePolicy=null;MatchingSummary.Text="공통헤더 규칙 미설정 · 기록 시작 전 ID/Length와 메시지 ID를 지정하세요.";editingProfileId=null;ProfileNameBox.Text="";SenderBox.Text="";ReceiverBox.Text="";selectedIcd=[];selectedIcdName="";selectedStructs=[];ByteOrderBox.SelectedIndex=0;StructPackBox.SelectedIndex=0;StructBitBox.SelectedIndex=0;IcdText.Text="선택된 CSV 없음";currentSchema=null;IcdFields.ItemsSource=null;CurrentMessageBox.ItemsSource=null;RangeFieldBox.ItemsSource=null;DecodeGrid.ItemsSource=null;MessageBoxSelect.ItemsSource=null;WriteFieldBox.ItemsSource=null;WriteValueBox.Text="0";WriteRawBox.IsChecked=false;BothDirectionsBox.IsChecked=true;GuestIcdAllowedBox.IsChecked=false;}
     private void NewProfileClick(object sender,RoutedEventArgs e){if(AdminAction()){ProfilesList.SelectedItem=null;NewEditor();}}
     private void ProfileSelected(object sender,SelectionChangedEventArgs e)
     {
         if(ProfilesList.SelectedItem is not RecordProfile p)return;
-        ClearPendingImports();IcdTabs.SelectedIndex=0;selectedCapturePolicy=p.CapturePolicy?.Clone();MatchingSummary.Text=selectedCapturePolicy==null?"공통헤더 규칙 미설정":$"UDP · ID {selectedCapturePolicy.IdField?.Name} · Length {selectedCapturePolicy.LengthField?.Name} · {selectedCapturePolicy.Messages.Count}개 메시지";editingProfileId=p.Id;ProfileNameBox.Text=p.Name;SenderBox.Text=string.Join(", ",p.SenderIps);ReceiverBox.Text=string.Join(", ",p.ReceiverIps);selectedIcd=p.IcdContent;selectedIcdName=p.IcdName;selectedStructs=p.StructSources.Select(x=>new StructSource(x.Name,[..x.Content])).ToList();ByteOrderBox.SelectedIndex=p.ByteOrder=="be"?1:p.ByteOrder=="le"?2:0;StructPackBox.SelectedIndex=Array.IndexOf(new[]{1,2,4,8},p.StructPack);StructBitBox.SelectedIndex=p.StructBitOrder=="msb0"?1:0;IcdEnabledBox.IsChecked=p.Enabled;BothDirectionsBox.IsChecked=p.BothDirections;GuestIcdAllowedBox.IsChecked=settings.GuestIcdAllowList.Contains(p.IcdId);UpdateIcdPreview();
+        ClearPendingImports();IcdTabs.SelectedIndex=0;selectedCapturePolicy=p.CapturePolicy?.Clone();MatchingSummary.Text=selectedCapturePolicy==null?"공통헤더 규칙 미설정":$"UDP · ID {selectedCapturePolicy.IdField?.Name} · Length {selectedCapturePolicy.LengthField?.Name} · {selectedCapturePolicy.Messages.Count}개 메시지";editingProfileId=p.Id;ProfileNameBox.Text=p.Name;SenderBox.Text=string.Join(", ",p.SenderIps);ReceiverBox.Text=string.Join(", ",p.ReceiverIps);selectedIcd=p.IcdContent;selectedIcdName=p.IcdName;selectedStructs=p.StructSources.Select(x=>new StructSource(x.Name,[..x.Content])).ToList();ByteOrderBox.SelectedIndex=p.ByteOrder=="be"?1:p.ByteOrder=="le"?2:0;StructPackBox.SelectedIndex=Array.IndexOf(new[]{1,2,4,8},p.StructPack);StructBitBox.SelectedIndex=p.StructBitOrder=="msb0"?1:0;BothDirectionsBox.IsChecked=p.BothDirections;GuestIcdAllowedBox.IsChecked=settings.GuestIcdAllowList.Contains(p.IcdId);UpdateIcdPreview();
     }
     private IcdSchema? currentSchema;private CapturePolicy? selectedCapturePolicy;
     private void UpdateIcdPreview()
@@ -193,9 +194,15 @@ public partial class MainWindow : Window
             if(currentSchema.Warnings.Count>0)IcdText.Text+="\n"+string.Join(" / ",currentSchema.Warnings);
         }catch(ArgumentException error){IcdText.Text="CSV 오류: "+error.Message;}
     }
-    private void CurrentMessageChanged(object sender,SelectionChangedEventArgs e){var fields=currentSchema?.Fields.Where(f=>f.Message==CurrentMessageBox.SelectedItem as string).ToList();IcdFields.ItemsSource=fields;RangeFieldBox.ItemsSource=fields?.Where(f=>f.Type is "uint" or "int" or "float32" or "float64").ToList();RangeFieldBox.SelectedIndex=0;}
-    private void RangeFieldChanged(object sender,SelectionChangedEventArgs e){var field=RangeFieldBox.SelectedItem as IcdField;MinimumBox.Text=field?.Minimum?.ToString(System.Globalization.CultureInfo.InvariantCulture)??"";MaximumBox.Text=field?.Maximum?.ToString(System.Globalization.CultureInfo.InvariantCulture)??"";}
-    private void ApplyRangeClick(object sender,RoutedEventArgs e){if(!AdminAction())return;try{if(currentSchema==null||RangeFieldBox.SelectedItem is not IcdField field)throw new ArgumentException("메시지와 숫자 필드를 선택하세요.");
+    private void CurrentMessageChanged(object sender,SelectionChangedEventArgs e){var fields=currentSchema?.Fields.Where(f=>f.Message==CurrentMessageBox.SelectedItem as string).ToList();IcdFields.ItemsSource=fields;RangeFieldBox.ItemsSource=fields;RangeFieldBox.SelectedIndex=0;}
+    private void RangeFieldChanged(object sender,SelectionChangedEventArgs e){var field=RangeFieldBox.SelectedItem as IcdField;MinimumBox.Text=field?.Minimum?.ToString(System.Globalization.CultureInfo.InvariantCulture)??"";MaximumBox.Text=field?.Maximum?.ToString(System.Globalization.CultureInfo.InvariantCulture)??"";bool numeric=field?.Type is "uint" or "int" or "float32" or "float64";MinimumBox.IsEnabled=MaximumBox.IsEnabled=ApplyRangeButton.IsEnabled=numeric;RangeFieldInfo.Text=field==null?"필드를 선택하세요.":$"{field.Name} · {field.Type} · {field.BitLength} bits"+(numeric?" · 최소/최대는 실제값 기준":" · 이 타입은 숫자 범위 검사를 적용하지 않습니다.");if(field!=null&&!Equals(IcdFields.SelectedItem,field))IcdFields.SelectedItem=field;}
+    private void IcdFieldSelected(object sender,SelectionChangedEventArgs e){if(IcdFields.SelectedItem is IcdField field&&!Equals(RangeFieldBox.SelectedItem,field))RangeFieldBox.SelectedItem=field;}
+    private void DeleteMessageClick(object sender,RoutedEventArgs e){if(!AdminAction())return;try{if(currentSchema==null||CurrentMessageBox.SelectedItem is not string message)throw new ArgumentException("삭제할 메시지를 선택하세요.");if(MessageBox.Show(this,$"메시지 '{message}'와 포함 필드를 현재 ICD에서 삭제할까요? 암호화 저장 전에는 저장본이 유지됩니다.","메시지 삭제",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;
+        var bytes=IcdImport.DeleteMessage(currentSchema,message);selectedIcd=bytes;selectedIcdName=bytes.Length==0?"":"icd-edited.csv";UpdateIcdPreview();
+        if(selectedCapturePolicy!=null){try{selectedCapturePolicy.Messages.RemoveAll(r=>r.Message==message);if(currentSchema==null)selectedCapturePolicy=null;else selectedCapturePolicy.Prepare(currentSchema);}catch(ArgumentException){selectedCapturePolicy=null;}}
+        MatchingSummary.Text=selectedCapturePolicy==null?"공통헤더 규칙 미설정 · ICD가 비어 있으면 새 메시지를 가져오세요.":$"메시지 삭제 반영 · {selectedCapturePolicy.Messages.Count}개 후보 · 암호화 저장 필요";StatusText.Text=bytes.Length==0?"마지막 메시지를 삭제했습니다. 새 ICD를 가져온 뒤 저장하세요.":"메시지 삭제 적용 완료 · 암호화 저장을 눌러 저장하세요.";
+        }catch(Exception error){ShowError(error);}}
+    private void ApplyRangeClick(object sender,RoutedEventArgs e){if(!AdminAction())return;try{if(currentSchema==null||RangeFieldBox.SelectedItem is not IcdField field||field.Type is not ("uint" or "int" or "float32" or "float64"))throw new ArgumentException("메시지와 숫자 필드를 선택하세요.");
         decimal? ParseBound(string text)=>string.IsNullOrWhiteSpace(text)?null:decimal.TryParse(text,System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out var number)?number:throw new ArgumentException("최소/최대값은 유한한 숫자여야 합니다.");
         var minimum=ParseBound(MinimumBox.Text);var maximum=ParseBound(MaximumBox.Text);if(minimum>maximum)throw new ArgumentException("최소값은 최대값보다 클 수 없습니다.");
         var candidate=new IcdSchema();candidate.Fields.AddRange(currentSchema.Fields.Select(f=>f==field?f with{Minimum=minimum,Maximum=maximum}:f));foreach(var pair in currentSchema.MessageSizes)candidate.MessageSizes[pair.Key]=pair.Value;
@@ -235,7 +242,7 @@ public partial class MainWindow : Window
         if(!AdminAction())return;
         try {
             // Export the current editor, including selected but not yet saved definitions/options.
-            var p=new RecordProfile{IcdName=selectedIcdName,IcdContent=selectedIcd,StructSources=selectedStructs,ByteOrder=SelectedByteOrder,StructPack=SelectedPack,StructBitOrder=SelectedBitOrder,Enabled=IcdEnabledBox.IsChecked==true};
+            var p=new RecordProfile{IcdName=selectedIcdName,IcdContent=selectedIcd,StructSources=selectedStructs,ByteOrder=SelectedByteOrder,StructPack=SelectedPack,StructBitOrder=SelectedBitOrder,Enabled=true};
             bool package=format==2,structure=format==1;string extension=package?".zip":structure?".hpp":".csv";
             var bytes=package?IcdExport.Package(session!,p):structure?IcdExport.Struct(session!,p):IcdExport.Csv(session!,p);
             try {
@@ -266,7 +273,6 @@ public partial class MainWindow : Window
     private void LoadSelectedProfileClick(object sender,RoutedEventArgs e){if(!AdminAction())return;try{if(ProfilesList.SelectedItem is not RecordProfile selected)throw new ArgumentException("불러올 저장 프로파일을 목록에서 선택하세요.");var id=selected.Id;var loaded=store.Load(session!);settings.ClearPlaintext();settings=loaded;ReloadEditors();ProfilesList.SelectedItem=settings.Profiles.FirstOrDefault(p=>p.Id==id);UpdateDashboard();StatusText.Text="선택 프로파일·ICD·헤더·공통헤더 설정을 암호화 저장소에서 불러왔습니다.";}catch(Exception error){ShowError(error);}}
     private void CancelImportsClick(object sender,RoutedEventArgs e){if(AdminAction())ClearPendingImports();}
     private void ClearStructClick(object sender,RoutedEventArgs e){if(!AdminAction())return;selectedStructs=[];UpdateIcdPreview();}
-    private void ReloadIcdClick(object sender,RoutedEventArgs e){if(!AdminAction())return;try{var loaded=store.Load(session!);settings.ClearPlaintext();settings=loaded;ReloadEditors();UpdateDashboard();NewEditor();StatusText.Text="암호화 저장소의 ICD 목록을 다시 읽었습니다.";}catch(Exception error){ShowError(error);}}
     private void ChooseIcdClick(object sender,RoutedEventArgs e)
     {
         if(!AdminAction())return;
@@ -281,7 +287,7 @@ public partial class MainWindow : Window
         if(!AdminAction())return;
         try {
             if(pendingCsv.Length>0||pendingHeaders.Count>0)throw new ArgumentException("선택 대기 파일이 있습니다. 먼저 교체/추가를 적용하거나 선택 취소하세요.");
-            var p=new RecordProfile {Id=editingProfileId??Guid.NewGuid().ToString("N"),Name=ProfileNameBox.Text.Trim(),IcdName=selectedIcdName,IcdContent=[..selectedIcd],StructSources=selectedStructs.Select(x=>new StructSource(x.Name,[..x.Content])).ToList(),ByteOrder=SelectedByteOrder,StructPack=SelectedPack,StructBitOrder=SelectedBitOrder,Enabled=IcdEnabledBox.IsChecked==true,CapturePolicy=selectedCapturePolicy?.Clone(),SenderIps=ParseIps(SenderBox.Text),ReceiverIps=ParseIps(ReceiverBox.Text),BothDirections=BothDirectionsBox.IsChecked==true};p.Validate();IcdProtection.Seal(session!,p);var allowGuest=GuestIcdAllowedBox.IsChecked==true;
+            var p=new RecordProfile {Id=editingProfileId??Guid.NewGuid().ToString("N"),Name=ProfileNameBox.Text.Trim(),IcdName=selectedIcdName,IcdContent=[..selectedIcd],StructSources=selectedStructs.Select(x=>new StructSource(x.Name,[..x.Content])).ToList(),ByteOrder=SelectedByteOrder,StructPack=SelectedPack,StructBitOrder=SelectedBitOrder,Enabled=true,CapturePolicy=selectedCapturePolicy?.Clone(),SenderIps=ParseIps(SenderBox.Text),ReceiverIps=ParseIps(ReceiverBox.Text),BothDirections=BothDirectionsBox.IsChecked==true};p.Validate();IcdProtection.Seal(session!,p);var allowGuest=GuestIcdAllowedBox.IsChecked==true;
             SaveChange(next=>{if(next.Profiles.Any(x=>x.Id!=p.Id&&x.Name.Equals(p.Name,StringComparison.OrdinalIgnoreCase)))throw new ArgumentException("프로파일 이름이 중복되었습니다.");next.Profiles.RemoveAll(x=>x.Id==p.Id);next.Profiles.Add(p);next.GuestIcdAllowList.RemoveAll(id=>id==p.IcdId);if(allowGuest)next.GuestIcdAllowList.Add(p.IcdId);});
         }catch(Exception error){ShowError(error);}
     }

@@ -115,3 +115,9 @@
 
 - New common-header dialogs create MatchByStructure=true: no per-message expected-ID inputs. Prepare builds all compatible ICD candidates using selected header field layouts and exact sizes. Actual ID values are unrestricted; Length must match actual payload. Ambiguous equal-size messages fail explicitly before recording/conversion.
 - Retain legacy ID rules only for backwards-compatible stored policies/tests. Applying and saving the new header dialog upgrades them. Minimal guest envelope carries mode+candidate sizes. CanOverlap treats structure-mode ID bits as unrestricted.
+
+## Message deletion and linked field selection
+
+- Delete a selected message with confirmation in the editor; retain other fields/layout/sizes/ranges, update remaining capture candidates, and never delete PCAP. Final message removal empties editor; import a new ICD before saving. Persistence remains explicit encrypted profile save.
+- List every current-message field in editor selector, including bool/bytes; only numeric types enable range entry. Table click and dropdown selection synchronize both ways. IcdFields.SelectionChanged is tenth dependent handler, attached after InitializeComponent only.
+- Remove active ICD checkbox and redundant reload action. Left profile buttons are equal-size New/Delete/Load in that order; remove duplicate footer delete. Newly saved profiles are enabled, NIC mappings control collection.
