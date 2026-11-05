@@ -23,6 +23,7 @@ internal static class CppStructExport
                 bool isBits=f.Type is "int" or "uint" or "bool"&&(f.StorageBits>0||f.BitOffset!=0||f.BitLength is not (8 or 16 or 32 or 64));
                 string declaration=f.Type=="bytes"?$"uint8_t {member}[{f.BitLength/8}]":$"{type} {member}"+(isBits?$" : {f.BitLength}":"");
                 string note=$"{f.Name} | byte={f.ByteOffset}, bit={f.BitOffset}, bits={f.BitLength}, endian={f.Endian}, bit_order={f.BitOrder}, scale={f.Scale.ToString(CultureInfo.InvariantCulture)}, bias={f.Bias.ToString(CultureInfo.InvariantCulture)}";
+                if(f.Minimum.HasValue||f.Maximum.HasValue)note+=$", min={f.Minimum?.ToString(CultureInfo.InvariantCulture)??"none"}, max={f.Maximum?.ToString(CultureInfo.InvariantCulture)??"none"}";
                 if(f.StorageBits>0)note+=$", storage={f.StorageBits}:{f.StorageBitOffset}";
                 if(f.Unit.Length>0)note+=" | unit="+f.Unit;if(f.Description.Length>0)note+=" | "+f.Description;
                 b.AppendLine($"    {declaration}; // {Comment(note)} |");

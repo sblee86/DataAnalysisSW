@@ -35,6 +35,8 @@ public partial class MainWindow : Window
         ByteOrderBox.SelectionChanged+=IcdOptionChanged;
         StructPackBox.SelectionChanged+=IcdOptionChanged;
         StructBitBox.SelectionChanged+=IcdOptionChanged;
+        CurrentMessageBox.SelectionChanged+=CurrentMessageChanged;
+        RangeFieldBox.SelectionChanged+=RangeFieldChanged;
         MessageBoxSelect.SelectionChanged+=WriteMessageSelected;
         NicGrid.SelectionChanged+=NicSelected;
         ApplyUiLayout(uiPreferences.LoadLayout(),false);UpdateNavColors("dashboard");SampleBox.ItemsSource=sampleNames;SampleBox.SelectedIndex=0;
@@ -160,7 +162,7 @@ public partial class MainWindow : Window
     private void ProfilesClick(object sender,RoutedEventArgs e){if(AdminAction())ShowPage("profiles");}
     private void SettingsClick(object sender,RoutedEventArgs e){if(AdminAction())ShowPage("settings");}
     private void ClearPendingImports(){pendingCsv=[];pendingCsvName="";pendingHeaders=[];PendingCsvText.Text="선택 대기 CSV 없음";PendingHeaderText.Text="선택 대기 헤더 없음";}
-    private void NewEditor(){ClearPendingImports();selectedCapturePolicy=null;MatchingSummary.Text="공통헤더 규칙 미설정 · 기록 시작 전 ID/Length와 메시지 ID를 지정하세요.";editingProfileId=null;ProfileNameBox.Text="";SenderBox.Text="";ReceiverBox.Text="";selectedIcd=[];selectedIcdName="";selectedStructs=[];ByteOrderBox.SelectedIndex=0;StructPackBox.SelectedIndex=0;StructBitBox.SelectedIndex=0;IcdEnabledBox.IsChecked=true;IcdText.Text="선택된 CSV 없음";currentSchema=null;IcdFields.ItemsSource=null;DecodeGrid.ItemsSource=null;MessageBoxSelect.ItemsSource=null;WriteFieldBox.ItemsSource=null;WriteValueBox.Text="0";WriteRawBox.IsChecked=false;BothDirectionsBox.IsChecked=true;GuestIcdAllowedBox.IsChecked=false;}
+    private void NewEditor(){ClearPendingImports();selectedCapturePolicy=null;MatchingSummary.Text="공통헤더 규칙 미설정 · 기록 시작 전 ID/Length와 메시지 ID를 지정하세요.";editingProfileId=null;ProfileNameBox.Text="";SenderBox.Text="";ReceiverBox.Text="";selectedIcd=[];selectedIcdName="";selectedStructs=[];ByteOrderBox.SelectedIndex=0;StructPackBox.SelectedIndex=0;StructBitBox.SelectedIndex=0;IcdEnabledBox.IsChecked=true;IcdText.Text="선택된 CSV 없음";currentSchema=null;IcdFields.ItemsSource=null;CurrentMessageBox.ItemsSource=null;RangeFieldBox.ItemsSource=null;DecodeGrid.ItemsSource=null;MessageBoxSelect.ItemsSource=null;WriteFieldBox.ItemsSource=null;WriteValueBox.Text="0";WriteRawBox.IsChecked=false;BothDirectionsBox.IsChecked=true;GuestIcdAllowedBox.IsChecked=false;}
     private void NewProfileClick(object sender,RoutedEventArgs e){if(AdminAction()){ProfilesList.SelectedItem=null;NewEditor();}}
     private void ProfileSelected(object sender,SelectionChangedEventArgs e)
     {
@@ -170,15 +172,23 @@ public partial class MainWindow : Window
     private IcdSchema? currentSchema;private CapturePolicy? selectedCapturePolicy;
     private void UpdateIcdPreview()
     {
-        currentSchema=null;IcdFields.ItemsSource=null;DecodeGrid.ItemsSource=null;MessageBoxSelect.ItemsSource=null;
+        currentSchema=null;IcdFields.ItemsSource=null;CurrentMessageBox.ItemsSource=null;RangeFieldBox.ItemsSource=null;DecodeGrid.ItemsSource=null;MessageBoxSelect.ItemsSource=null;
         try {
             if(selectedIcd.Length==0){IcdText.Text="선택된 CSV 없음 · 헤더 "+selectedStructs.Count+"개";return;}
             if(!selectedIcdName.EndsWith(".csv",StringComparison.OrdinalIgnoreCase))throw new ArgumentException("기존 IDL 원본을 유지합니다. CSV로 다시 선택한 후 저장하세요.");
-            currentSchema=IcdCsv.Parse(selectedIcd,SelectedByteOrder,selectedStructs,SelectedPack,SelectedBitOrder);IcdFields.ItemsSource=currentSchema.Fields;MessageBoxSelect.ItemsSource=currentSchema.Messages;MessageBoxSelect.SelectedIndex=0;
+            currentSchema=IcdCsv.Parse(selectedIcd,SelectedByteOrder,selectedStructs,SelectedPack,SelectedBitOrder);IcdFields.ItemsSource=null;CurrentMessageBox.ItemsSource=currentSchema.Messages;CurrentMessageBox.SelectedIndex=0;MessageBoxSelect.ItemsSource=currentSchema.Messages;MessageBoxSelect.SelectedIndex=0;
             IcdText.Text=$"{selectedIcdName} · {currentSchema.Fields.Count} fields / {currentSchema.Messages.Length} messages · {currentSchema.EncodingName} · {SelectedByteOrder.ToUpperInvariant()} · 헤더 {selectedStructs.Count}개";
             if(currentSchema.Warnings.Count>0)IcdText.Text+="\n"+string.Join(" / ",currentSchema.Warnings);
         }catch(ArgumentException error){IcdText.Text="CSV 오류: "+error.Message;}
     }
+    private void CurrentMessageChanged(object sender,SelectionChangedEventArgs e){var fields=currentSchema?.Fields.Where(f=>f.Message==CurrentMessageBox.SelectedItem as string).ToList();IcdFields.ItemsSource=fields;RangeFieldBox.ItemsSource=fields?.Where(f=>f.Type is "uint" or "int" or "float32" or "float64").ToList();RangeFieldBox.SelectedIndex=0;}
+    private void RangeFieldChanged(object sender,SelectionChangedEventArgs e){var field=RangeFieldBox.SelectedItem as IcdField;MinimumBox.Text=field?.Minimum?.ToString(System.Globalization.CultureInfo.InvariantCulture)??"";MaximumBox.Text=field?.Maximum?.ToString(System.Globalization.CultureInfo.InvariantCulture)??"";}
+    private void ApplyRangeClick(object sender,RoutedEventArgs e){if(!AdminAction())return;try{if(currentSchema==null||RangeFieldBox.SelectedItem is not IcdField field)throw new ArgumentException("메시지와 숫자 필드를 선택하세요.");
+        decimal? ParseBound(string text)=>string.IsNullOrWhiteSpace(text)?null:decimal.TryParse(text,System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out var number)?number:throw new ArgumentException("최소/최대값은 유한한 숫자여야 합니다.");
+        var minimum=ParseBound(MinimumBox.Text);var maximum=ParseBound(MaximumBox.Text);if(minimum>maximum)throw new ArgumentException("최소값은 최대값보다 클 수 없습니다.");
+        var candidate=new IcdSchema();candidate.Fields.AddRange(currentSchema.Fields.Select(f=>f==field?f with{Minimum=minimum,Maximum=maximum}:f));foreach(var pair in currentSchema.MessageSizes)candidate.MessageSizes[pair.Key]=pair.Value;
+        var csv=IcdExport.CsvSchema(candidate);IcdCsv.Parse(csv);selectedIcd=csv;selectedIcdName="icd-ranges.csv";UpdateIcdPreview();CurrentMessageBox.SelectedItem=field.Message;RangeFieldBox.SelectedItem=currentSchema!.Fields.First(f=>f.Message==field.Message&&f.Name==field.Name);StatusText.Text="범위 적용 완료 · scale/bias 적용 후 값, 경계 포함 · 암호화 저장을 눌러 저장하세요.";
+        }catch(Exception error){ShowError(error);}}
     private void WriteMessageSelected(object sender,SelectionChangedEventArgs e)
     {
         if(WriteFieldBox==null)return;WriteFieldBox.ItemsSource=currentSchema?.Fields.Where(f=>f.Message==MessageBoxSelect.SelectedItem as string).ToList();WriteFieldBox.SelectedIndex=0;
@@ -323,7 +333,7 @@ public partial class MainWindow : Window
         if(!File.Exists(ConvertInputBox.Text)){ShowError(new ArgumentException("PCAP 파일을 선택하세요."));return;}
         var dialog=new SaveFileDialog{Title="변환 CSV 저장",Filter="CSV (*.csv)|*.csv",FileName=Path.GetFileNameWithoutExtension(ConvertInputBox.Text)+"_values.csv"};if(dialog.ShowDialog()!=true)return;
         var input=ConvertInputBox.Text;busy=true;ConvertButton.IsEnabled=false;CancelConvertButton.IsEnabled=true;ConversionProfileBox.IsEnabled=false;conversionCancellation=new();UpdateControls();
-        try{var fresh=File.Exists(store.FilePath)?store.Load(session):settings;try{var result=await Task.Run(()=>PcapCsvConverter.Convert(session,fresh,p.Id,message,input,dialog.FileName,conversionCancellation.Token));ConversionResultText.Text=$"변환 완료: {result.Rows:N0}행 · 전체 {result.Frames:N0}프레임 · 제외 {result.Skipped:N0}개 · 해석 오류 행 {result.RowsWithErrors:N0}개\n{dialog.FileName}";}finally{if(!ReferenceEquals(fresh,settings))fresh.ClearPlaintext();}}
+        try{var fresh=File.Exists(store.FilePath)?store.Load(session):settings;try{var result=await Task.Run(()=>PcapCsvConverter.Convert(session,fresh,p.Id,message,input,dialog.FileName,conversionCancellation.Token));ConversionResultText.Text=$"변환 완료: {result.Rows:N0}행 · 전체 {result.Frames:N0}프레임 · 제외 {result.Skipped:N0}개 · 해석 오류 행 {result.RowsWithErrors:N0}개 · 범위 이탈 행 {result.RowsOutsideRange:N0}개\n{dialog.FileName}";}finally{if(!ReferenceEquals(fresh,settings))fresh.ClearPlaintext();}}
         catch(OperationCanceledException){ConversionResultText.Text="변환을 취소했습니다. 미완료 CSV는 남기지 않습니다.";}
         catch(Exception error){ShowError(error);}
         finally{conversionCancellation.Dispose();conversionCancellation=null;busy=false;CancelConvertButton.IsEnabled=false;ConversionProfileBox.IsEnabled=true;UpdateControls();ConversionProfileSelected(this,new SelectionChangedEventArgs(System.Windows.Controls.Primitives.Selector.SelectionChangedEvent,Array.Empty<object>(),Array.Empty<object>()));}

@@ -141,6 +141,10 @@ try {
  Check(result.Frames==1&&result.Rows==1&&result.Skipped==0&&text.Contains("\"84\""),"allowed guest PCAP to CSV decodes UDP value and skips unrelated/ARP frames");
  File.Delete(csv);csvSettings.GuestIcdAllowList.Clear();Denied(()=>PcapCsvConverter.Convert(guest!,csvSettings,convertProfile.Id,"Default",input,csv),"revoked CSV permission checked on each conversion");
  var adminResult=PcapCsvConverter.Convert(admin!,csvSettings,convertProfile.Id,"Default",input,csv);Check(adminResult.Rows==1,"admin converts all interfaces without guest grants");
+ convertProfile.IcdContent=Encoding.UTF8.GetBytes("name,byte_offset,bit_length,type,min,max\nvalue,0,8,uint,0,80");IcdProtection.Seal(admin!,convertProfile);
+ var rangedResult=PcapCsvConverter.Convert(admin!,csvSettings,convertProfile.Id,"Default",input,csv);var rangedCsv=File.ReadAllText(csv);
+ Check(rangedResult.RowsOutsideRange==1&&rangedResult.RowsWithErrors==0&&rangedCsv.Contains("\"84\"")&&rangedCsv.Contains("RangeError")&&rangedCsv.Contains("범위 이탈"),"PCAP conversion retains measured out-of-range value and counts range errors separately");
+ CapturePolicyAccess.Seal(admin!,convertProfile,GuestIcdAccess.PublicKey(guest!));csvSettings.GuestIcdAllowList=[convertProfile.IcdId];GuestIcdAccess.Seal(admin!,convertProfile,GuestIcdAccess.PublicKey(guest!));var guestRange=PcapCsvConverter.Convert(guest!,csvSettings.ForSession(guest!),convertProfile.Id,"Default",input,csv);Check(guestRange.RowsOutsideRange==1,"authorized guest conversion checks encrypted ICD range limits");
  Throws(()=>PcapCsvConverter.Convert(admin!,csvSettings,convertProfile.Id,"Default",input,input),"conversion cannot overwrite original PCAP");
  File.Delete(csv);using var canceled=new CancellationTokenSource();canceled.Cancel();try{PcapCsvConverter.Convert(admin!,csvSettings,convertProfile.Id,"Default",input,csv,canceled.Token);throw new Exception("Cancellation ignored");}catch(OperationCanceledException){Check(!File.Exists(csv),"canceled conversion removes incomplete output");}
  Check(Directory.GetFiles(conversionDirectory,"*.tmp").Length==0,"conversion does not leave plaintext temporary files");
@@ -378,4 +382,16 @@ var headerOnlyCsv=IcdImport.FromHeaders([new("legacy.h",Encoding.UTF8.GetBytes(l
 Check(headerOnly.RequiredBytes("LegacyPacket")==31&&headerOnly.Fields.Any(f=>f.Name=="status"&&f.StorageBits==8),"header-only apply builds complete ICD with bit storage and sizes");
 var combinedHeaderSources=IcdImport.CombineHeaders([new("a.h",[1,2])],[new("a.h",[1,2]),new("b.h",[3])]);Check(combinedHeaderSources.Count==2,"header append retains old sources and deduplicates identical file");Throws(()=>IcdImport.CombineHeaders([new("a.h",[1,2])],[new("a.h",[9])]),"header append refuses silent same-name overwrite");
 var schemaRoundtrip=IcdCsv.Parse(IcdImport.Merge(expectedSchema,mergeTwo));Check(schemaRoundtrip.RequiredBytes("Envelope")==13&&schemaRoundtrip.Fields.Single(f=>f.Name=="packet.telemetry.mode").StorageBits==16,"CSV append preserves existing external bit layout and tail size");
+Console.WriteLine($"{checks} total checks passed");
+
+var rangeSchema=Parse("name,byte_offset,bit_length,type,scale,bias,min,max\nx,0,8,int,0.5,-1,-2,2");
+Check(rangeSchema.Decode("Default",new byte[]{6})[0] is {Value:"2.0",RangeError:"",Error:""},"inclusive upper engineering boundary");
+Check(rangeSchema.Decode("Default",new byte[]{254})[0].RangeError=="","inclusive signed lower engineering boundary");
+var outside=rangeSchema.Decode("Default",new byte[]{7})[0];Check(outside.Value=="2.5"&&outside.Raw=="7"&&outside.Error==""&&outside.RangeError.Length>0,"out of range preserves raw and engineering value");
+Check(rangeSchema.Decode("Default",new byte[]{253})[0].RangeError.Length>0,"signed below minimum flagged");
+var largeRange=Parse("name,byte_offset,bit_length,type,min,max\nx,0,64,uint,18446744073709551614,18446744073709551614");Check(largeRange.Decode("Default",Convert.FromHexString("FFFFFFFFFFFFFFFE"))[0].RangeError==""&&largeRange.Decode("Default",Convert.FromHexString("FFFFFFFFFFFFFFFF"))[0].RangeError.Length>0,"uint64 range comparison exact above double precision");
+Throws(()=>Parse("name,byte_offset,bit_length,type,min,max\nx,0,8,uint,9,1"),"inverted limits rejected");Throws(()=>Parse("name,byte_offset,bit_length,type,min\nx,0,8,uint,NaN"),"nonfinite range rejected");Throws(()=>Parse("name,byte_offset,bit_length,type,min\nx,0,8,bytes,0"),"nonnumeric range rejected");
+var upperOnly=Parse("name,byte_offset,bit_length,type,max\nx,0,8,uint,0");Check(upperOnly.Decode("Default",new byte[]{0})[0].RangeError==""&&upperOnly.Decode("Default",new byte[]{1})[0].RangeError.Length>0,"zero maximum and open minimum supported");
+var floatRange=Parse("name,byte_offset,bit_length,type,min,max\nx,0,32,float,0,1");Check(floatRange.Decode("Default",Convert.FromHexString("3FC00000"))[0].RangeError.Length>0,"float range comparison supported");
+var rangeRoundtrip=IcdCsv.Parse(IcdExport.CsvSchema(rangeSchema));Check(rangeRoundtrip.Fields[0].Minimum==-2&&rangeRoundtrip.Fields[0].Maximum==2,"range bounds retained in editable CSV export/reimport");
 Console.WriteLine($"{checks} total checks passed");

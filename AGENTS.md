@@ -98,3 +98,9 @@
 - File selection stages CSV/headers only; never mutate applied ICD on selection. Replace/add commits a validated candidate atomically. Preserve source on duplicate/overlap/layout errors. Pending imports must be applied/cancelled before profile save.
 - IcdImport merges normalized schemas with storage bits/message sizes; headers can attach as dependencies or generate ICD messages explicitly. Applying definitions invalidates old header matching policy for user revalidation.
 - Explicit encrypted save/load profile buttons use existing Windows-user store and admin permissions; do not claim separate per-app-account files. Web mirrors actions in session memory only.
+
+## Message view and engineering ranges
+
+- Current ICD table filters by a separate message selector; exports retain all messages. Range editor applies nullable decimal Minimum/Maximum to numeric fields only; inclusive engineering value after scale/bias, blanks unbounded, preserve exact uint64 comparisons.
+- CSV min/max roundtrip, encrypted profile storage and merge retain bounds. PCAP conversion preserves out-of-range measurements, appends RangeError separately from DecodeError and counts RowsOutsideRange. Bounds never change capture filtering or guest conversion authorization. C++ comments are informational; CSV carries ranges on reimport.
+- Nine dependent MainWindow selection handlers (including message/range selectors) must be wired only after InitializeComponent. Update the existing startup regression check, never wire them in BAML.

@@ -1,0 +1,7 @@
+message,name,byte_offset,bit_length,type,scale,bias,unit,min,max
+Temperature,ID,0,16,uint,1,0,,1,1
+Temperature,Length,2,16,uint,1,0,,6,6
+Temperature,temperature,4,16,int,0.1,0,degC,-40,85
+Voltage,ID,0,16,uint,1,0,,2,2
+Voltage,Length,2,16,uint,1,0,,6,6
+Voltage,voltage,4,16,uint,0.01,0,V,0,30

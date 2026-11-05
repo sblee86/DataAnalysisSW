@@ -8,7 +8,7 @@ namespace LanScope;
 /// <summary>Explicit administrator plaintext export; never writes into the encrypted store.</summary>
 public static class IcdExport
 {
-    public static readonly string[] Columns=["message","name","byte_offset","bit_offset","bit_length","type","endian","bit_order","scale","bias","unit","description","storage_bits","storage_bit_offset","message_size"];
+    public static readonly string[] Columns=["message","name","byte_offset","bit_offset","bit_length","type","endian","bit_order","scale","bias","unit","description","storage_bits","storage_bit_offset","message_size","min","max"];
     public static byte[] Csv(LoginSession session,RecordProfile profile)=>WithSource(session,profile,p=>CsvSchema(p.ParseSchema()));
     public static byte[] Struct(LoginSession session,RecordProfile profile)=>WithSource(session,profile,p=>Encoding.UTF8.GetBytes(CppStructExport.Generate(p.ParseSchema())));
     public static byte[] Package(LoginSession session,RecordProfile profile)=>WithSource(session,profile,p=>{
@@ -35,7 +35,7 @@ public static class IcdExport
         string Quote(string value)=>"\""+value.Replace("\"","\"\"")+"\"";
         string N(object value)=>Convert.ToString(value,CultureInfo.InvariantCulture)!;
         var text=new StringBuilder();text.AppendLine(string.Join(",",Columns.Select(Quote)));
-        foreach(var f in schema.Fields)text.AppendLine(string.Join(",",new[]{f.Message,f.Name,N(f.ByteOffset),N(f.BitOffset),N(f.BitLength),f.Type,f.Endian,f.BitOrder,N(f.Scale),N(f.Bias),f.Unit,f.Description,N(f.StorageBits),N(f.StorageBitOffset),N(schema.RequiredBytes(f.Message))}.Select(Quote)));
+        foreach(var f in schema.Fields)text.AppendLine(string.Join(",",new[]{f.Message,f.Name,N(f.ByteOffset),N(f.BitOffset),N(f.BitLength),f.Type,f.Endian,f.BitOrder,N(f.Scale),N(f.Bias),f.Unit,f.Description,N(f.StorageBits),N(f.StorageBitOffset),N(schema.RequiredBytes(f.Message)),f.Minimum.HasValue?N(f.Minimum.Value):"",f.Maximum.HasValue?N(f.Maximum.Value):""}.Select(Quote)));
         var utf8=new UTF8Encoding(true);return utf8.GetPreamble().Concat(utf8.GetBytes(text.ToString())).ToArray();
     }
     private static string CppString(string value)=>"\""+string.Concat(Encoding.UTF8.GetBytes(value).Select(b=>b is >=32 and <=126 && b is not (34 or 92)?((char)b).ToString():"\\"+Convert.ToString(b,8).PadLeft(3,'0')))+"\"";

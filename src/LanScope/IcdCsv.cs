@@ -3,12 +3,12 @@ using System.IO;
 using System.Text;
 
 namespace LanScope;
-public sealed record IcdField(string Message,string Name,int ByteOffset,int BitOffset,int BitLength,string Type,string Endian,string BitOrder,decimal Scale,decimal Bias,string Unit,string Description,int SourceLine,int StorageBits=0,int StorageBitOffset=0)
+public sealed record IcdField(string Message,string Name,int ByteOffset,int BitOffset,int BitLength,string Type,string Endian,string BitOrder,decimal Scale,decimal Bias,string Unit,string Description,int SourceLine,int StorageBits=0,int StorageBitOffset=0,decimal? Minimum=null,decimal? Maximum=null)
 {
     public int EndByte=>ByteOffset+(StorageBits>0?StorageBits/8:(BitOffset+BitLength+7)/8);
     public string Location=>StorageBits>0?$"{ByteOffset}:u{StorageBits}/{StorageBitOffset}":$"{ByteOffset}:{BitOffset}";
 }
-public sealed record DecodedField(string Message,string Name,string Raw,string Value,string Unit,string Error);
+public sealed record DecodedField(string Message,string Name,string Raw,string Value,string Unit,string Error,string RangeError="");
 public sealed class IcdSchema
 {
     public List<IcdField> Fields {get;}=[];
@@ -40,7 +40,14 @@ public sealed class IcdSchema
                     }else value=raw;
                     valueText=checked(value*f.Scale+f.Bias).ToString(CultureInfo.InvariantCulture);
                 }
-                result.Add(new(message,f.Name,rawText,valueText,f.Unit,""));
+                string rangeError="";
+                if(f.Minimum.HasValue||f.Maximum.HasValue){
+                    bool outside=f.Type is "float32" or "float64"
+                        ? (f.Minimum.HasValue&&double.Parse(valueText,CultureInfo.InvariantCulture)<(double)f.Minimum.Value)||(f.Maximum.HasValue&&double.Parse(valueText,CultureInfo.InvariantCulture)>(double)f.Maximum.Value)
+                        : (f.Minimum.HasValue&&decimal.Parse(valueText,CultureInfo.InvariantCulture)<f.Minimum.Value)||(f.Maximum.HasValue&&decimal.Parse(valueText,CultureInfo.InvariantCulture)>f.Maximum.Value);
+                    if(outside)rangeError=$"범위 이탈: {valueText} (min={f.Minimum?.ToString(CultureInfo.InvariantCulture)??"없음"}, max={f.Maximum?.ToString(CultureInfo.InvariantCulture)??"없음"})";
+                }
+                result.Add(new(message,f.Name,rawText,valueText,f.Unit,"",rangeError));
             }catch(Exception e) when(e is ArgumentException or OverflowException){result.Add(new(message,f.Name,"—","—",f.Unit,e.Message));}
         }
         return result;
@@ -114,6 +121,7 @@ public static class IcdCsv
         ["type"]=["type","datatype","자료형","타입"],
         ["endian"]=["endian","byteorder","엔디언"],
         ["bit_order"]=["bitorder","bitnumbering","비트순서"],
+        ["minimum"]=["min","minimum","최소","최소값"], ["maximum"]=["max","maximum","최대","최대값"],
         ["scale"]=["scale","배율"], ["bias"]=["bias","valueoffset","보정값"],
         ["unit"]=["unit","단위"], ["description"]=["description","comment","설명"], ["storage_bits"]=["storagebits"], ["storage_bit_offset"]=["storagebitoffset"], ["message_size"]=["messagesize"], ["struct_name"]=["structname","struct","구조체"]
     };
@@ -169,6 +177,7 @@ public static class IcdCsv
                 var order=Get("bit_order","msb0").ToLowerInvariant();decimal scale=Decimal("scale",1),bias=Decimal("bias",0);
                 if(name.Length==0||message.Length==0||name.Length>128||message.Length>128)throw new ArgumentException("메시지/필드 이름을 1~128자로 지정하세요.");
                 if(structName.Length>0||type=="struct") {
+                    if(Get("minimum").Length>0||Get("maximum").Length>0)throw new ArgumentException("struct 전체 범위는 지원하지 않습니다. 가져온 뒤 숫자 멤버별로 설정하세요.");
                     if(bit!=0||structName.Length==0)throw new ArgumentException("struct 이름과 바이트 정렬이 필요합니다.");if(structs==null||structs.Count==0)throw new ArgumentException("외부 C/C++ struct 파일을 함께 선택하세요.");
                     if(endian is not ("be" or "le"))throw new ArgumentException("엔디언은 be/le입니다.");var key=endian+":"+structBitOrder+":"+structPack;
                     if(!layouts.TryGetValue(key,out var library)){library=CStructParser.Parse(structs,structPack,endian,structBitOrder);layouts.Add(key,library);}
@@ -186,7 +195,10 @@ public static class IcdCsv
                 if(type=="bool"&&((length!=1&&!(length==8&&bit==0&&storageOffset==0))||scale!=1||bias!=0))throw new ArgumentException("bool은 1 bit 또는 정렬된 C bool 8 bits, scale=1, bias=0이어야 합니다.");
                 if(type is "float32" or "float64" && (bit!=0||length!=(type=="float32"?32:64)))throw new ArgumentException("float 필드는 바이트 정렬된 32/64 bits이어야 합니다.");
                 if(type=="bytes"&&(bit!=0||length%8!=0||scale!=1||bias!=0))throw new ArgumentException("bytes는 바이트 정렬/8배수 길이, scale=1, bias=0이어야 합니다.");
-                Add(new(message,name,start,bit,length,type,endian,order,scale,bias,Get("unit"),Get("description"),row.Line,storage,storageOffset));
+                decimal? minimum=Get("minimum").Length==0?null:Decimal("minimum",0),maximum=Get("maximum").Length==0?null:Decimal("maximum",0);
+                if((minimum.HasValue||maximum.HasValue)&&type is "bytes" or "bool")throw new ArgumentException("최소/최대값은 숫자 필드에만 설정합니다.");
+                if(minimum>maximum)throw new ArgumentException("최소값은 최대값보다 클 수 없습니다.");
+                Add(new(message,name,start,bit,length,type,endian,order,scale,bias,Get("unit"),Get("description"),row.Line,storage,storageOffset,minimum,maximum));
             }catch(ArgumentException e){throw new ArgumentException($"CSV {row.Line}행: {e.Message}",e);}
         }
         foreach(var field in schema.Fields)if(schema.MessageSizes.TryGetValue(field.Message,out var size)&&size<field.EndByte)throw new ArgumentException("message_size가 필드보다 작습니다.");
