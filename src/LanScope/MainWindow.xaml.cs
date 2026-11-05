@@ -52,7 +52,11 @@ public partial class MainWindow : Window
     private UiLayoutOptions uiLayout=new();private Window? displaySettings;
     private void ApplyUiLayout(UiLayoutOptions value,bool persist)
     {
-        value.Validate();uiLayout=value;
+        value.Validate();var previousLayout=uiLayout;uiLayout=value;
+        IcdFields.Height=value.IcdTableHeight;
+        if(!persist||previousLayout.WindowWidth!=value.WindowWidth||previousLayout.WindowHeight!=value.WindowHeight||previousLayout.Maximized!=value.Maximized){
+            WindowState=WindowState.Normal;Width=Math.Min(value.WindowWidth,SystemParameters.WorkArea.Width);Height=Math.Min(value.WindowHeight,SystemParameters.WorkArea.Height);if(value.Maximized)WindowState=WindowState.Maximized;
+        }
         foreach(var key in Resources.Keys.OfType<string>().Where(k=>k.StartsWith("UiFont")||k.StartsWith("UiLine")||k.StartsWith("UiHeight")||k.StartsWith("UiRow")).ToList()){
             var n=double.Parse(new string(key.Where(char.IsDigit).ToArray()),System.Globalization.CultureInfo.InvariantCulture);
             double ratio=key.StartsWith("UiFont")&&n>=18?value.Title/28.0:value.Body/13.0;
@@ -66,8 +70,16 @@ public partial class MainWindow : Window
         TestNameBox.FontSize=value.TestNameFont;TestNameFrame.Width=value.TestNameWidth;TestNameFrame.MinHeight=Math.Max(56,value.TestNameFont*1.5+24);TestNameFrame.Height=Math.Max(value.TestNameHeight,TestNameFrame.MinHeight);
         if(persist)try{uiPreferences.SaveLayout(value);}catch(Exception e) when(e is IOException or UnauthorizedAccessException){StatusText.Text="화면 설정 저장 실패: "+e.Message;}
     }
-    private void ScreenSettingsClick(object sender,RoutedEventArgs e){if(displaySettings!=null){displaySettings.Activate();return;}displaySettings=new DisplaySettingsWindow(uiLayout,v=>ApplyUiLayout(v,true),session?.Role==UserRole.Admin,ChangeAdminPassword){Owner=this};displaySettings.Closed+=(_,_)=>displaySettings=null;displaySettings.Show();}
+    private void ScreenSettingsClick(object sender,RoutedEventArgs e){if(displaySettings!=null){displaySettings.Activate();return;}displaySettings=new DisplaySettingsWindow(uiLayout,v=>ApplyUiLayout(v,true),session?.Role==UserRole.Admin,ChangeAdminPassword,settings.GuestUserId,ChangeGuestCredentials){Owner=this};displaySettings.Closed+=(_,_)=>displaySettings=null;displaySettings.Show();}
     private AdminCredentials Credentials()=>new(Resource("accounts.bin"),Resource("policy-public.bin"),store.ReadCredentialDigest);
+    private void ChangeGuestCredentials(string id,string password){if(!AdminAction())throw new UnauthorizedAccessException("관리자만 게스트 계정을 변경할 수 있습니다.");GuestCredentials.Change(session!,id,password,(name,envelope,recipient)=>{
+        var next=IcdProtection.CloneForAdmin(session!,settings);next.GuestUserId=name;next.GuestLoginEnvelope=envelope;next.GuestRecipientPublicKey=recipient;try{store.Save(session!,next);}catch{next.ClearPlaintext();throw;}var editorCsv=selectedIcd.ToArray();var bindingIds=BindingProfiles.SelectedItems.Cast<RecordProfile>().Select(p=>p.Id).ToHashSet();var conversionId=(ConversionProfileBox.SelectedItem as RecordProfile)?.Id;
+        settings.ClearPlaintext();settings=next;selectedIcd=editorCsv;ProfilesList.SelectionChanged-=ProfileSelected;
+        try{ProfilesList.ItemsSource=settings.Profiles;ProfilesList.SelectedItem=settings.Profiles.FirstOrDefault(p=>p.Id==editingProfileId);}finally{ProfilesList.SelectionChanged+=ProfileSelected;}
+        BindingProfiles.ItemsSource=settings.Profiles;foreach(var profile in settings.Profiles.Where(p=>bindingIds.Contains(p.Id)))BindingProfiles.SelectedItems.Add(profile);
+        ConversionProfileBox.ItemsSource=settings.Profiles;ConversionProfileBox.SelectedItem=settings.Profiles.FirstOrDefault(p=>p.Id==conversionId);UpdateDashboard();
+    });StatusText.Text="게스트 로그인 변경 완료 · ICD 변환 권한 유지 · 다음 로그인부터 적용";}
+    private GuestCredentials GuestLogin()=>new(Resource("accounts.bin"),Resource("policy-public.bin"),store.ReadGuestLoginEnvelope);
     private void ChangeAdminPassword(string current,string next)
     {
         if(!AdminAction())throw new InvalidOperationException("현재는 비밀번호를 변경할 수 없습니다.");
@@ -115,7 +127,7 @@ public partial class MainWindow : Window
         busy=true;LoginButton.IsEnabled=false;LoginError.Text="";
         LoginSession? candidate=null;var id=UserIdBox.Text;var password=PasswordInput.Password;PasswordInput.Clear();
         try {
-            var result=await Task.Run(()=>Credentials().Login(id,password));
+            var result=await Task.Run(()=>id.Trim()=="admin"?Credentials().Login(id,password):GuestLogin().Login(id,password));
             candidate=result;password="";
             if(result==null){failedLogins++;if(failedLogins>=5){blockedUntil=DateTime.UtcNow.AddSeconds(30);failedLogins=0;}LoginError.Text="ID 또는 암호가 올바르지 않습니다.";return;}
             displaySettings?.Close();settings.ClearPlaintext();settings=store.Load(result);engine.ClearHistory();session=result;candidate=null;failedLogins=0;

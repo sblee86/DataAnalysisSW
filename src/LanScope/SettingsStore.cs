@@ -15,13 +15,15 @@ public sealed class SettingsStore(string? filePath = null, byte[]? policyPublicK
         using var stream=assembly.GetManifestResourceStream("LanScope.Resources.policy-public.bin")??throw new InvalidDataException("설정 검증키가 없습니다.");
         using var output=new MemoryStream();stream.CopyTo(output);return output.ToArray();
     }
-    public string ReadCredentialDigest()
+    public string ReadCredentialDigest()=>ReadAuthProperty("AdminCredentialDigest");
+    public byte[] ReadGuestLoginEnvelope()=>Convert.FromBase64String(ReadAuthProperty("GuestLoginEnvelope"));
+    private string ReadAuthProperty(string property)
     {
         if(!File.Exists(FilePath))return "";var bytes=File.ReadAllBytes(FilePath);
         if(bytes.Length<8)throw new InvalidDataException("설정파일 형식 오류");if(Encoding.ASCII.GetString(bytes,0,8)=="LSCFG001")return "";
         if(bytes.Length<72||Encoding.ASCII.GetString(bytes,0,8)!="LSCFG002")throw new InvalidDataException("설정파일 형식 오류");
         IcdProtection.Verify(PublicKey(),bytes[..8].Concat(bytes[72..]).ToArray(),bytes[8..72]);var plain=Protect(bytes[72..],false);
-        try{using var json=JsonDocument.Parse(plain);return json.RootElement.TryGetProperty("AdminCredentialDigest",out var digest)?digest.GetString()??"":"";}finally{CryptographicOperations.ZeroMemory(plain);}
+        try{using var json=JsonDocument.Parse(plain);return json.RootElement.TryGetProperty(property,out var digest)?digest.GetString()??"":"";}finally{CryptographicOperations.ZeroMemory(plain);}
     }
     public WorkspaceSettings Load(LoginSession session)
     {
@@ -54,7 +56,7 @@ public sealed class SettingsStore(string? filePath = null, byte[]? policyPublicK
     public void Save(LoginSession session, WorkspaceSettings settings)
     {
         session.RequireAdmin();
-        foreach(var profile in settings.Profiles){IcdProtection.Seal(session,profile);CapturePolicyAccess.Seal(session,profile,guestPublicKey??GuestIcdAccess.EmbeddedPublicKey());if(settings.GuestIcdAllowList.Contains(profile.IcdId))GuestIcdAccess.Seal(session,profile,guestPublicKey??GuestIcdAccess.EmbeddedPublicKey());else profile.GuestConversionIcd=[];}
+        foreach(var profile in settings.Profiles){IcdProtection.Seal(session,profile);CapturePolicyAccess.Seal(session,profile,(settings.GuestRecipientPublicKey.Length>0?settings.GuestRecipientPublicKey:guestPublicKey??GuestIcdAccess.EmbeddedPublicKey()));if(settings.GuestIcdAllowList.Contains(profile.IcdId))GuestIcdAccess.Seal(session,profile,(settings.GuestRecipientPublicKey.Length>0?settings.GuestRecipientPublicKey:guestPublicKey??GuestIcdAccess.EmbeddedPublicKey()));else profile.GuestConversionIcd=[];}
         settings.ValidateCaptureConflicts();
         settings.GuestIcdAllowList.RemoveAll(id=>!settings.Profiles.Any(p=>p.IcdId==id));
         var plain=JsonSerializer.SerializeToUtf8Bytes(settings); byte[] encrypted;

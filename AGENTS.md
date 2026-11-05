@@ -104,3 +104,9 @@
 - Current ICD table filters by a separate message selector; exports retain all messages. Range editor applies nullable decimal Minimum/Maximum to numeric fields only; inclusive engineering value after scale/bias, blanks unbounded, preserve exact uint64 comparisons.
 - CSV min/max roundtrip, encrypted profile storage and merge retain bounds. PCAP conversion preserves out-of-range measurements, appends RangeError separately from DecodeError and counts RowsOutsideRange. Bounds never change capture filtering or guest conversion authorization. C++ comments are informational; CSV carries ranges on reimport.
 - Nine dependent MainWindow selection handlers (including message/range selectors) must be wired only after InitializeComponent. Update the existing startup regression check, never wire them in BAML.
+
+## Guest management and window dimensions
+
+- Account/security tab exists only for admin, including guest ID/password reset. GuestCredentials service requires admin, signs password-wrapped random guest root, stores envelope+recipient public key in signed DPAPI workspace atomically. SettingsStore seals all minimal capture policies and permitted conversion ICDs to configured GuestRecipientPublicKey; fallback embedded public key only before override. Main login routes nonadmin through GuestCredentials, never falls back to embedded guest after override. Keep admin root/account pins unchanged.
+- Rebind UI references after guest reset without destroying unsaved ICD editor data. Guest allowlist is unchanged. Credentials are not included in ICD exports or public demo persistence.
+- UI4 extends prior preferences with WindowWidth/WindowHeight/Maximized/IcdTableHeight; read old formats. Default1600x1000 maximized, clamp real WPF size to work area. Both roles can adjust layout. Web only sizes its preview canvas and stores nonsecret layout preferences.

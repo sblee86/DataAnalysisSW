@@ -91,6 +91,9 @@ public sealed class NicBinding
 }
 public sealed class WorkspaceSettings
 {
+    public string GuestUserId {get;set;}="guest";
+    public byte[] GuestLoginEnvelope {get;set;}=[];
+    public byte[] GuestRecipientPublicKey {get;set;}=[];
     public string AdminCredentialDigest {get;set;}="";
     public string OutputDirectory { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),"LANscope","Records");
     public List<RecordProfile> Profiles { get; set; } = [];
