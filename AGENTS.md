@@ -87,3 +87,8 @@
 - PacketHeaderMatcher is integrated in NicRecording/CaptureEngine and PCAP→CSV. User selects header.ID and Length from ICD or standalone CSV/C++ header, chooses header inclusion/length basis, sets ID→message mapping. CapturePolicy.Prepare validates header fields against each ICD when included, expected sizes and ID uniqueness. Checksum supports explicit none; UDP only, no fragmentation/TCP reassembly.
 - Policy/header originals are encrypted separately; minimal guest envelope permits valid recording without full ICD disclosure or conversion grants. No policy means start is rejected. Wrong/ambiguous packets never reach PcapFile.Write. Preserve existing credential/key pins.
 - Keep design/header-match.js copied to docs and preview artifacts. Demo uses synthetic PDUs with explicit rules, not real NIC capture. Never invent actual user header offsets.
+
+## Legacy header compatibility
+
+- CStructParser and design/c-struct.js accept Windows LLP64 legacy scalar spellings (char signed1, short2, int/long4, long long8), typedef/using aliases, const/volatile value members and comma declarators including integer bitfields. Keep both parsers aligned. Includes are never executed; unsupported layouts must fail explicitly.
+- Regression sample samples/LegacyPacket.h and export→edit legacy fields→reimport checks cover this contract. Ordinary C++ declarations reimport with selected pack/endian/bit order; exact wire offsets/scaling roundtrip through normalized CSV.

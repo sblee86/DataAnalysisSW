@@ -356,3 +356,13 @@ try {
 }finally{Directory.Delete(strictDir,true);}
 var signedHeaderSchema=Parse("message,name,byte_offset,bit_length,type\nS,ID,0,8,int\nS,Length,1,8,uint\nS,value,2,8,uint");var signedPolicy=new CapturePolicy{IdField=signedHeaderSchema.Fields[0] with{Endian="le"},LengthField=signedHeaderSchema.Fields[1],HeaderFields=[signedHeaderSchema.Fields[0] with{Endian="le"},signedHeaderSchema.Fields[1]],HeaderBytes=2,IcdIncludesHeader=true,Messages=[new("S","0xFF")]};signedPolicy.Prepare(signedHeaderSchema);Check(signedPolicy.CreateMatcher(headerProfile).Match(sourceIp,destinationIp,Convert.FromHexString("FF0354")).Accepted,"signed header declaration uses raw ID bits and single-byte endian is equivalent");
 Console.WriteLine($"{checks} meaningful checks passed. Windows DPAPI/WPF/live NIC tests remain Windows-only.");
+
+var legacyText=File.ReadAllText(Path.Combine(root,"samples/LegacyPacket.h"));
+var legacy=CStructParser.Parse([new("legacy.h",Encoding.UTF8.GetBytes(legacyText))])["LegacyPacket"];
+Check(legacy.Size==31&&legacy.Fields.Single(f=>f.Name=="label[0]").Type=="int"&&legacy.Fields.Single(f=>f.Name=="counter").BitLength==64&&legacy.Fields.Single(f=>f.Name=="timestamp").BitLength==32&&legacy.Fields.Single(f=>f.Name=="status").StorageBitOffset==3,"legacy C types, aliases, qualifiers, comma members and bit fields");
+foreach(var type in new[]{"char","unsigned char","signed char","short int","signed short int","unsigned short int","signed","signed int","unsigned","long int","unsigned long int","signed long long int","unsigned long long int","__int64","unsigned __int64"})
+ Check(CStructParser.Parse([new("types.h",Encoding.UTF8.GetBytes("struct Types { "+type+" value; };"))])["Types"].Fields.Count==1,"legacy scalar "+type);
+var editedHeader=sampleDeclarations.Replace("uint16_t sequence;","unsigned short int sequence;").Replace("float voltage;","float voltage; char label[4]; unsigned long long added;");
+var editedLayout=CStructParser.Parse([new("edited.hpp",Encoding.UTF8.GetBytes(editedHeader))])["Telemetry"];
+Check(editedLayout.Fields.Single(f=>f.Name=="added").BitLength==64&&editedLayout.Fields.Any(f=>f.Name=="label[3]"),"export C++ then edit legacy types/add fields and reimport");
+Console.WriteLine($"{checks} total checks passed");

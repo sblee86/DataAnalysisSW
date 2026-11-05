@@ -15,6 +15,18 @@ public static class CStructParser
         if(sources.Count>128||sources.Sum(s=>(long)s.Content.Length)>16*1024*1024)throw new ArgumentException("struct 파일 합계는 최대 16 MB입니다.");
         var definitions=new Dictionary<string,Definition>(StringComparer.Ordinal);var aliases=new Dictionary<string,string>(StringComparer.Ordinal);var constants=new Dictionary<string,int>(StringComparer.Ordinal);
         var primitives=new Dictionary<string,Scalar>(StringComparer.OrdinalIgnoreCase){["uint8_t"]=new(1,"uint"),["int8_t"]=new(1,"int"),["uint16_t"]=new(2,"uint"),["int16_t"]=new(2,"int"),["uint32_t"]=new(4,"uint"),["int32_t"]=new(4,"int"),["uint64_t"]=new(8,"uint"),["int64_t"]=new(8,"int"),["uint8"]=new(1,"uint"),["uint16"]=new(2,"uint"),["uint32"]=new(4,"uint"),["uint64"]=new(8,"uint"),["unsigned char"]=new(1,"uint"),["signed char"]=new(1,"int"),["unsigned short"]=new(2,"uint"),["short"]=new(2,"int"),["unsigned int"]=new(4,"uint"),["int"]=new(4,"int"),["float"]=new(4,"float32"),["double"]=new(8,"float64"),["bool"]=new(1,"bool"),["BYTE"]=new(1,"uint"),["WORD"]=new(2,"uint"),["DWORD"]=new(4,"uint")};
+        // Windows LLP64: char=1 (signed default), short=2, int/long=4, long long=8.
+        foreach(var (names,bytes,kind) in new[]{("char",1,"int"),("signed short|short int|signed short int",2,"int"),("unsigned short int",2,"uint"),("long|long int|signed long|signed long int",4,"int"),("unsigned|unsigned long|unsigned long int",4,"uint"),("long long|long long int|signed long long|signed long long int|__int64",8,"int"),("unsigned long long|unsigned long long int|unsigned __int64",8,"uint")})
+            foreach(var name in names.Split('|'))primitives[name]=new(bytes,kind);
+        primitives["signed"]=primitives["signed int"]=new(4,"int");
+        string Normalize(string value)=>Regex.Replace(Regex.Replace(value,@"\b(const|volatile)\b", " ").Trim(),@"\s+"," ");
+        // Expand comma-separated members while retaining their shared declaration type.
+        string Expand(string body)=>string.Join(";",body.Split(';').SelectMany(raw=>{
+            var parts=raw.Split(',');if(parts.Length==1)return new[]{raw};
+            var first=Regex.Match(parts[0].Trim(),@"^(?<type>(?:[A-Za-z_]\w*\s+)+)(?<member>[A-Za-z_]\w*(?:\s*\[.*?\])?(?:\s*:\s*\w+)?)$");
+            if(!first.Success)throw new ArgumentException("미지원 복합 선언: "+raw);
+            return new[]{parts[0]}.Concat(parts.Skip(1).Select(part=>first.Groups["type"].Value+part.Trim()));
+        }));
         int Number(string text){text=text.Trim();if(constants.TryGetValue(text,out int value))return value;return text.StartsWith("0x",StringComparison.OrdinalIgnoreCase)?int.Parse(text[2..],NumberStyles.HexNumber,CultureInfo.InvariantCulture):int.Parse(text,CultureInfo.InvariantCulture);}
         string RemoveComments(string value)=>Regex.Replace(value,@"/\*[\s\S]*?\*/|//[^\r\n]*",m=>new string(m.Value.Select(c=>c is '\n' or '\r'?c:' ').ToArray()));
         foreach(var source in sources) {
@@ -39,11 +51,12 @@ public static class CStructParser
                 var tag=match.Groups["tag"].Value;var alias=match.Groups["alias"].Value;string name=alias.Length>0?alias:tag;
                 if(!match.Groups["typedef"].Success&&alias.Length>0)throw new ArgumentException("struct 인스턴스 선언은 지원하지 않습니다.");
                 if(name.Length==0||definitions.ContainsKey(name))throw new ArgumentException("이름 없는/중복 struct: "+name);
-                int ownPack=packEvents.Last(e=>e.Index<=match.Index).Pack;definitions.Add(name,new(name,match.Groups["body"].Value,ownPack));if(tag.Length>0&&tag!=name)aliases[tag]=name;
+                int ownPack=packEvents.Last(e=>e.Index<=match.Index).Pack;definitions.Add(name,new(name,Expand(match.Groups["body"].Value),ownPack));if(tag.Length>0&&tag!=name)aliases[tag]=name;
                 for(int i=match.Index;i<match.Index+match.Length;i++)residual[i]=' ';
             }
-            string rest=new(residual);foreach(Match alias in Regex.Matches(rest,@"typedef\s+(?:struct\s+)?([A-Za-z_]\w*(?:\s+(?:char|short|int))?)\s+([A-Za-z_]\w*)\s*;")){if(alias.Groups[2].Value==alias.Groups[1].Value)continue;if(!aliases.TryAdd(alias.Groups[2].Value,alias.Groups[1].Value))throw new ArgumentException("중복 typedef: "+alias.Groups[2].Value);}
-            rest=Regex.Replace(rest,@"typedef\s+(?:struct\s+)?[A-Za-z_]\w*(?:\s+(?:char|short|int))?\s+[A-Za-z_]\w*\s*;","");
+            string rest=new(residual);
+            rest=Regex.Replace(rest,@"using\s+([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*)\s*;",m=>{if(!aliases.TryAdd(m.Groups[1].Value,Normalize(m.Groups[2].Value)))throw new ArgumentException("중복 alias: "+m.Groups[1].Value);return "";});foreach(Match alias in Regex.Matches(rest,@"typedef\s+(?:struct\s+)?([A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*?)\s+([A-Za-z_]\w*)\s*;")){if(alias.Groups[2].Value==alias.Groups[1].Value)continue;if(!aliases.TryAdd(alias.Groups[2].Value,Normalize(alias.Groups[1].Value)))throw new ArgumentException("중복 typedef: "+alias.Groups[2].Value);}
+            rest=Regex.Replace(rest,@"typedef\s+(?:struct\s+)?[A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*?\s+[A-Za-z_]\w*\s*;","");
             if(!string.IsNullOrWhiteSpace(rest.Replace(";","")))throw new ArgumentException(source.Name+": 미지원 선언이 남았습니다. 포인터/함수/inline struct/동적 배열은 지원하지 않습니다.");
         }
         var result=new Dictionary<string,StructLayoutInfo>(StringComparer.Ordinal);var active=new HashSet<string>();
@@ -56,9 +69,9 @@ public static class CStructParser
             int cursor=0,maxAlignment=1,unitOffset=-1,unitBytes=0,usedBits=0;string unitType="";var fields=new List<IcdField>();var names=new HashSet<string>();
             foreach(var raw in definition.Body.Split(';',StringSplitOptions.RemoveEmptyEntries)) {
                 string declaration=Regex.Replace(raw.Trim(),@"\s+"," ");if(declaration.Length==0)continue;
-                var member=Regex.Match(declaration,@"^(?<type>(?:struct )?[A-Za-z_]\w*(?: (?:char|short|int))?)\s+(?<name>[A-Za-z_]\w*)?(?:\s*\[\s*(?<count>[A-Za-z_]\w*|0x[0-9a-fA-F]+|\d+)\s*\])?(?:\s*:\s*(?<bits>\d+))?$");
+                var member=Regex.Match(declaration,@"^(?<type>(?:struct )?[A-Za-z_]\w*(?: [A-Za-z_]\w*)*?)\s+(?<name>[A-Za-z_]\w*)?(?:\s*\[\s*(?<count>[A-Za-z_]\w*|0x[0-9a-fA-F]+|\d+)\s*\])?(?:\s*:\s*(?<bits>\d+))?$");
                 if(!member.Success)throw new ArgumentException(name+": 미지원 멤버 선언: "+declaration);
-                string type=Resolve(member.Groups["type"].Value.Replace("struct ","")),fieldName=member.Groups["name"].Value;bool isBits=member.Groups["bits"].Success;int count=member.Groups["count"].Success?Number(member.Groups["count"].Value):1;
+                string type=Resolve(Normalize(member.Groups["type"].Value.Replace("struct ",""))),fieldName=member.Groups["name"].Value;bool isBits=member.Groups["bits"].Success;int count=member.Groups["count"].Success?Number(member.Groups["count"].Value):1;
                 if(count<1||count>1024||(isBits&&member.Groups["count"].Success))throw new ArgumentException("고정 배열 길이/비트 필드 배열 오류");
                 if(fieldName.Length>0&&!names.Add(fieldName))throw new ArgumentException("중복 struct 필드: "+fieldName);
                 bool scalar=primitives.TryGetValue(type,out var primitive);var nested=scalar?null:Compile(type,depth+1);int bytes=scalar?primitive!.Bytes:nested!.Size,alignment=Math.Min(scalar?bytes:nested!.Alignment,definition.Pack);maxAlignment=Math.Max(maxAlignment,alignment);

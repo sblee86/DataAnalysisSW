@@ -76,7 +76,7 @@ Envelope,packet,0,struct,be,Envelope
 - pack은 **1/2/4/8 중 명시 선택**, 기본 1. `#pragma pack(push,n)`/`pop`/`pack(n)`은 해당 구조체의 선택값을 덮어씁니다. 멤버 정렬은 min(타입 정렬, pack), 구조체 끝은 최대 멤버 정렬로 패딩합니다. 배열 stride는 꼬리 패딩을 포함한 struct 크기입니다.
 - C 비트 필드는 같은 기본 정수 타입의 저장 단위를 공유하고 단위가 모자라면 다음 단위로 이동합니다. 선택한 endian으로 정수 단위를 읽고 **lsb0이면 하위 비트부터, msb0이면 상위 비트부터 선언 순으로** 배치합니다. CSV 일반 비트 필드의 바이트별 번호 규칙과는 별개입니다. 읽기/쓰기 모두 같은 저장 단위 규칙을 사용하며 다른 비트는 유지합니다.
 - C/C++ 비트 필드 ABI는 컴파일러/플랫폼마다 다릅니다. 이 규칙은 특정 컴파일러 ABI 자동 감지가 아닙니다. 실제 송신 코드의 sizeof/offsetof/테스트 바이트와 대조하세요. 다른 ABI는 명시적인 일반 CSV 물리 필드로 정의하세요.
-- `#include`는 실행하거나 파일을 자동 탐색하지 않습니다. 필요한 헤더를 모두 선택하세요. 단순 include guard/pragma once와 십진/16진 정수 define만 지원합니다. 조건부 컴파일·매크로 계산·포인터·함수·union·enum·namespace·class·template·동적/다차원 배열·inline 중첩 struct·long/wchar_t/크기 모호한 char는 오류로 거절합니다. 전처리/컴파일러를 실행하지 않습니다.
+- `#include`는 실행하거나 파일을 자동 탐색하지 않습니다. 필요한 헤더를 모두 선택하세요. 단순 include guard/pragma once와 십진/16진 정수 define만 지원합니다. 조건부 컴파일·매크로 계산·포인터·함수·union·enum·namespace·class·template·동적/다차원 배열·inline 중첩 struct·wchar_t는 오류로 거절합니다. 전처리/컴파일러를 실행하지 않습니다.
 - 헤더 합계 최대 16 MB/128개, CSV 최대 16 MB, 전개 깊이 16, 필드 10,000개, payload 65,535 bytes입니다. 헤더 이름/내용도 CSV와 같은 암호화 번들에 들어가며 평문 파일로 복사하지 않습니다. 저장 후 활성 상태와 endian/pack/비트 옵션도 함께 유지합니다.
 
 실제 IDLStudio CSV 샘플이 오면 열 매핑을 그 형식에 맞춥니다. C 헤더를 읽는 것만으로 네트워크 CDR/직렬화 포맷을 추정하지 않습니다.
@@ -133,3 +133,11 @@ ZIP에 다음을 넣습니다. 파일은 명시적 관리자 내보내기에 따
 - `dras-wire.hpp`: CSV만 있는 ICD에도 생성하는 **C++17 wire-buffer struct와 raw 값 읽기/쓰기 메서드**. 메시지별 `dras::message_1` 등은 `wire[]`와 `read_field_1()`/`write_field_1()`을 제공하고, `field_1.name/type/unit/scale/bias`에 원래 메타데이터를 보관합니다. bytes 필드는 포인터/크기를 제공합니다. 쓰기는 다른 비트를 보존합니다.
 
 생성된 C++ 헤더는 호스트 endian/컴파일러 bitfield ABI 대신 명시적인 물리 비트 위치를 사용합니다. 정수/float 메서드는 **raw unsigned 비트 패턴**을 읽고 쓰며, signed 해석·IEEE754 변환·scale/bias 적용은 호출자가 메타데이터에 맞춰 수행합니다. 이 생성 헤더는 C++ 연동용이며 제한된 struct 가져오기 파서의 입력이 아닙니다. 다시 가져올 정의를 수정할 때는 `icd-edit.csv` 또는 `original/headers`를 사용하세요. 암호, 키, 전체 설정, PCAP은 ZIP에 포함하지 않습니다.
+
+### Legacy C/C++ 헤더 편집 호환성
+
+WPF와 웹 모두 `char`, `signed/unsigned char`, `short [int]`, `signed/unsigned short [int]`, `int`, `signed`, `unsigned`, `long [int]`, `signed/unsigned long [int]`, `long long [int]`, `signed/unsigned long long [int]`, `__int64`, `unsigned __int64`를 지원합니다. Windows LLP64 기준으로 char=1, short=2, int/long=4, long long=8바이트이며 plain char는 signed입니다. `/J`로 컴파일한 unsigned plain char는 `unsigned char`로 명시하세요. Linux LP64의 8바이트 long을 추정하지 않습니다.
+
+단순 `typedef unsigned short int USHORT;`, `using MessageId = unsigned long;`, const/volatile 값 멤버, `int a, b;`, `unsigned char mode : 3, status : 5;`도 읽습니다. 별칭은 대소문자를 구별하며 include 파일은 직접 함께 선택해야 합니다. `samples/LegacyPacket.h`를 예제로 제공합니다.
+
+일반 구조체(.hpp)로 내보낸 뒤 위 타입으로 수정하거나 멤버를 추가하고 다시 가져올 수 있습니다. 구조체의 실제 배치는 선택한 pack/endian/bit 순서로 다시 계산됩니다. 정확한 기존 wire offset·scale까지 유지할 때는 정규화 CSV를 수정하여 가져오세요. 정의를 변경한 뒤 공통헤더 ID/Length 매핑을 다시 검증하고 프로파일을 저장하세요.
