@@ -366,3 +366,16 @@ var editedHeader=sampleDeclarations.Replace("uint16_t sequence;","unsigned short
 var editedLayout=CStructParser.Parse([new("edited.hpp",Encoding.UTF8.GetBytes(editedHeader))])["Telemetry"];
 Check(editedLayout.Fields.Single(f=>f.Name=="added").BitLength==64&&editedLayout.Fields.Any(f=>f.Name=="label[3]"),"export C++ then edit legacy types/add fields and reimport");
 Console.WriteLine($"{checks} total checks passed");
+
+var mergeOne=IcdCsv.Parse(Encoding.UTF8.GetBytes("message,name,byte_offset,bit_length,type\nOne,x,0,8,uint"));
+var mergeTwo=IcdCsv.Parse(Encoding.UTF8.GetBytes("message,name,byte_offset,bit_length,type\nTwo,y,0,16,uint"));
+var merged=IcdCsv.Parse(IcdImport.Merge(mergeOne,mergeTwo));
+Check(merged.Messages.Length==2&&merged.RequiredBytes("Two")==2,"CSV append validates and retains both messages");
+Throws(()=>IcdImport.Merge(mergeOne,mergeOne),"CSV append rejects duplicate fields without replacing source");
+var overlapIncoming=IcdCsv.Parse(Encoding.UTF8.GetBytes("message,name,byte_offset,bit_length,type\nOne,other,0,8,uint"));Throws(()=>IcdImport.Merge(mergeOne,overlapIncoming),"CSV append rejects physical overlaps");
+Check(mergeOne.Fields.Count==1&&mergeOne.Fields[0].Name=="x","failed CSV append leaves current schema unchanged");
+var headerOnlyCsv=IcdImport.FromHeaders([new("legacy.h",Encoding.UTF8.GetBytes(legacyText))],1,"le","lsb0");var headerOnly=IcdCsv.Parse(headerOnlyCsv);
+Check(headerOnly.RequiredBytes("LegacyPacket")==31&&headerOnly.Fields.Any(f=>f.Name=="status"&&f.StorageBits==8),"header-only apply builds complete ICD with bit storage and sizes");
+var combinedHeaderSources=IcdImport.CombineHeaders([new("a.h",[1,2])],[new("a.h",[1,2]),new("b.h",[3])]);Check(combinedHeaderSources.Count==2,"header append retains old sources and deduplicates identical file");Throws(()=>IcdImport.CombineHeaders([new("a.h",[1,2])],[new("a.h",[9])]),"header append refuses silent same-name overwrite");
+var schemaRoundtrip=IcdCsv.Parse(IcdImport.Merge(expectedSchema,mergeTwo));Check(schemaRoundtrip.RequiredBytes("Envelope")==13&&schemaRoundtrip.Fields.Single(f=>f.Name=="packet.telemetry.mode").StorageBits==16,"CSV append preserves existing external bit layout and tail size");
+Console.WriteLine($"{checks} total checks passed");

@@ -92,3 +92,9 @@
 
 - CStructParser and design/c-struct.js accept Windows LLP64 legacy scalar spellings (char signed1, short2, int/long4, long long8), typedef/using aliases, const/volatile value members and comma declarators including integer bitfields. Keep both parsers aligned. Includes are never executed; unsupported layouts must fail explicitly.
 - Regression sample samples/LegacyPacket.h and export→edit legacy fields→reimport checks cover this contract. Ordinary C++ declarations reimport with selected pack/endian/bit order; exact wire offsets/scaling roundtrip through normalized CSV.
+
+## Explicit import actions
+
+- File selection stages CSV/headers only; never mutate applied ICD on selection. Replace/add commits a validated candidate atomically. Preserve source on duplicate/overlap/layout errors. Pending imports must be applied/cancelled before profile save.
+- IcdImport merges normalized schemas with storage bits/message sizes; headers can attach as dependencies or generate ICD messages explicitly. Applying definitions invalidates old header matching policy for user revalidation.
+- Explicit encrypted save/load profile buttons use existing Windows-user store and admin permissions; do not claim separate per-app-account files. Web mirrors actions in session memory only.

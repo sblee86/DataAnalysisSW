@@ -30,7 +30,7 @@ public static class IcdExport
         try{IcdProtection.Open(session,temporary);return action(temporary);}finally{temporary.ClearPlaintext();}
     }
     private static string SafeName(string name){var safe=new string(name.Select(c=>char.IsAsciiLetterOrDigit(c)||c is '.' or '_' or '-'?c:'_').ToArray());return safe.Length==0?"source.h":safe;}
-    private static byte[] CsvSchema(IcdSchema schema)
+    internal static byte[] CsvSchema(IcdSchema schema)
     {
         string Quote(string value)=>"\""+value.Replace("\"","\"\"")+"\"";
         string N(object value)=>Convert.ToString(value,CultureInfo.InvariantCulture)!;

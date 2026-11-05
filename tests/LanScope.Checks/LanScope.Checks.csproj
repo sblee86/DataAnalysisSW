@@ -10,6 +10,7 @@
     <Compile Include="../../src/LanScope/CStructParser.cs" Link="CStructParser.cs" />
     <Compile Include="../../src/LanScope/IcdBundle.cs" Link="IcdBundle.cs" />
     <Compile Include="../../src/LanScope/CppStructExport.cs" Link="CppStructExport.cs" />
+    <Compile Include="../../src/LanScope/IcdImport.cs" Link="IcdImport.cs" />
     <Compile Include="../../src/LanScope/IcdExport.cs" Link="IcdExport.cs" />
     <Compile Include="../../src/LanScope/CapturePolicy.cs" Link="CapturePolicy.cs" />
     <Compile Include="../../src/LanScope/CapturePolicyAccess.cs" Link="CapturePolicyAccess.cs" />
