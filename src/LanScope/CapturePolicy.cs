@@ -5,6 +5,7 @@ namespace LanScope;
 public sealed record CaptureMessageRule(string Message,string Id,int BodyBytes=0);
 public sealed class CapturePolicy
 {
+    public bool MatchByStructure {get;set;}
     public string Transport {get;set;}="UDP";
     public string Checksum {get;set;}="none";
     public IcdField? IdField {get;set;}
@@ -26,12 +27,13 @@ public sealed class CapturePolicy
     private static bool SameLayout(IcdField a,IcdField b)=>a.Type==b.Type&&a.BitLength==b.BitLength&&IcdExport.NumericPhysicalBits(a).SequenceEqual(IcdExport.NumericPhysicalBits(b));
     public void Prepare(IcdSchema schema)
     {
+        if(MatchByStructure){if(IdField==null||LengthField==null)throw new ArgumentException("ID·Length 필드를 선택하세요.");Messages=schema.Messages.Where(m=>!IcdIncludesHeader||new[]{IdField!,LengthField!}.All(field=>schema.Fields.Any(f=>f.Message==m&&SameLayout(f,field)))).Where(m=>schema.RequiredBytes(m)+DecodeOffset>=HeaderBytes).Select(m=>new CaptureMessageRule(m,"",schema.RequiredBytes(m))).ToList();}
         Validate();if(!SeparateHeader&&!IcdIncludesHeader)throw new ArgumentException("ICD가 본문만 포함하면 별도 헤더를 선택하세요.");
         if(HeaderFields.Count==0)throw new ArgumentException("헤더 필드가 없습니다.");
         if(!HeaderFields.Any(f=>SameLayout(f,IdField!))||!HeaderFields.Any(f=>SameLayout(f,LengthField!)))throw new ArgumentException("선택한 ID/Length가 헤더에 포함되어 있지 않습니다.");
         var updated=new List<CaptureMessageRule>();
         foreach(var rule in Messages){if(!schema.Messages.Contains(rule.Message))throw new ArgumentException("ICD 메시지를 찾을 수 없습니다: "+rule.Message);
-            if(IcdIncludesHeader)foreach(var field in HeaderFields)if(!schema.Fields.Any(f=>f.Message==rule.Message&&SameLayout(f,field)))throw new ArgumentException($"{rule.Message}: 헤더 필드 {field.Name}의 위치·타입·길이·엔디언이 ICD와 다릅니다.");
+            if(IcdIncludesHeader)foreach(var field in (MatchByStructure?new[]{IdField!,LengthField!}.AsEnumerable():HeaderFields))if(!schema.Fields.Any(f=>f.Message==rule.Message&&SameLayout(f,field)))throw new ArgumentException($"{rule.Message}: 헤더 필드 {field.Name}의 위치·타입·길이·엔디언이 ICD와 다릅니다.");
             if(HeaderBytes>(long)schema.RequiredBytes(rule.Message)+DecodeOffset)throw new ArgumentException("헤더가 전체 ICD 패킷보다 큽니다.");
             updated.Add(rule with{BodyBytes=schema.RequiredBytes(rule.Message)});
         }
@@ -48,16 +50,16 @@ public sealed class CapturePolicy
     public PacketHeaderMatcher CreateMatcher(RecordProfile profile)
     {
         Validate();var schema=new IcdSchema();foreach(var r in Messages){if(r.BodyBytes is <1 or >65535)throw new ArgumentException("ICD 메시지 크기를 먼저 검증·저장하세요.");schema.Fields.Add(new(r.Message,"_payload",0,0,r.BodyBytes*8,"bytes","be","msb0",1,0,"","",0));}
-        return new PacketHeaderMatcher(profile,schema,IdField!,LengthField!,Messages.Select(r=>new HeaderMessageId(ParseId(r.Id),r.Message)),LengthAdjustment,DecodeOffset);
+        return new PacketHeaderMatcher(profile,schema,IdField!,LengthField!,Messages.Select(r=>new HeaderMessageId(MatchByStructure?0:ParseId(r.Id),r.Message)),LengthAdjustment,DecodeOffset,MatchByStructure);
     }
     internal bool CanOverlap(CapturePolicy other)
     {
         foreach(var a in Messages)foreach(var b in other.Messages){int total=a.BodyBytes+DecodeOffset;if(total!=b.BodyBytes+other.DecodeOffset)continue;var assignments=new Dictionary<int,bool>();
             bool Add(IcdField field,ulong value){var bits=IcdExport.NumericPhysicalBits(field);for(int k=0;k<bits.Length;k++){bool bit=((value>>k)&1)!=0;if(assignments.TryGetValue(bits[k],out var old)&&old!=bit)return false;assignments[bits[k]]=bit;}return true;}
-            if(Add(IdField!,ParseId(a.Id))&&Add(LengthField!,(ulong)(total-LengthAdjustment))&&Add(other.IdField!,ParseId(b.Id))&&Add(other.LengthField!,(ulong)(total-other.LengthAdjustment)))return true;
+            if((MatchByStructure||Add(IdField!,ParseId(a.Id)))&&Add(LengthField!,(ulong)(total-LengthAdjustment))&&(other.MatchByStructure||Add(other.IdField!,ParseId(b.Id)))&&Add(other.LengthField!,(ulong)(total-other.LengthAdjustment)))return true;
         }return false;
     }
     public CapturePolicy Clone()=>JsonSerializer.Deserialize<CapturePolicy>(JsonSerializer.Serialize(this))!;
-    public CapturePolicy Minimal()=>new(){Transport=Transport,Checksum=Checksum,IdField=IdField,LengthField=LengthField,HeaderFields=[IdField!,LengthField!],SeparateHeader=SeparateHeader,IcdIncludesHeader=IcdIncludesHeader,HeaderBytes=HeaderBytes,LengthIncludesHeader=LengthIncludesHeader,Messages=[..Messages],ExternalPack=ExternalPack,ExternalEndian=ExternalEndian,ExternalBitOrder=ExternalBitOrder};
+    public CapturePolicy Minimal()=>new(){MatchByStructure=MatchByStructure,Transport=Transport,Checksum=Checksum,IdField=IdField,LengthField=LengthField,HeaderFields=[IdField!,LengthField!],SeparateHeader=SeparateHeader,IcdIncludesHeader=IcdIncludesHeader,HeaderBytes=HeaderBytes,LengthIncludesHeader=LengthIncludesHeader,Messages=[..Messages],ExternalPack=ExternalPack,ExternalEndian=ExternalEndian,ExternalBitOrder=ExternalBitOrder};
     public void Clear(){foreach(var s in HeaderSources)CryptographicOperations.ZeroMemory(s.Content);HeaderSources=[];HeaderFields=[];IdField=LengthField=null;Messages=[];HeaderName="";}
 }

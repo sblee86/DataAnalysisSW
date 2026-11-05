@@ -110,3 +110,8 @@
 - Account/security tab exists only for admin, including guest ID/password reset. GuestCredentials service requires admin, signs password-wrapped random guest root, stores envelope+recipient public key in signed DPAPI workspace atomically. SettingsStore seals all minimal capture policies and permitted conversion ICDs to configured GuestRecipientPublicKey; fallback embedded public key only before override. Main login routes nonadmin through GuestCredentials, never falls back to embedded guest after override. Keep admin root/account pins unchanged.
 - Rebind UI references after guest reset without destroying unsaved ICD editor data. Guest allowlist is unchanged. Credentials are not included in ICD exports or public demo persistence.
 - UI4 extends prior preferences with WindowWidth/WindowHeight/Maximized/IcdTableHeight; read old formats. Default1600x1000 maximized, clamp real WPF size to work area. Both roles can adjust layout. Web only sizes its preview canvas and stores nonsecret layout preferences.
+
+## Automatic structure matching supersedes expected-ID entry
+
+- New common-header dialogs create MatchByStructure=true: no per-message expected-ID inputs. Prepare builds all compatible ICD candidates using selected header field layouts and exact sizes. Actual ID values are unrestricted; Length must match actual payload. Ambiguous equal-size messages fail explicitly before recording/conversion.
+- Retain legacy ID rules only for backwards-compatible stored policies/tests. Applying and saving the new header dialog upgrades them. Minimal guest envelope carries mode+candidate sizes. CanOverlap treats structure-mode ID bits as unrestricted.
