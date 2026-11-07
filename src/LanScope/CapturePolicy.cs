@@ -44,7 +44,7 @@ public sealed class CapturePolicy
     }
     public void Prepare(IcdSchema schema)
     {
-        if(RequireHeaderLayout){ValidateHeaderDefinition();var errors=schema.Messages.Select(m=>HeaderError(schema,m)).Where(e=>e.Length>0).ToList();if(errors.Count>0)throw new ArgumentException(string.Join("\n",errors));}
+        if(RequireHeaderLayout){ValidateHeaderDefinition();HeaderFields=[IdField!,LengthField!];var errors=schema.Messages.Select(m=>HeaderError(schema,m)).Where(e=>e.Length>0).ToList();if(errors.Count>0)throw new ArgumentException(string.Join("\n",errors));}
         if(MatchByStructure){if(IdField==null||LengthField==null)throw new ArgumentException("ID·Length 필드를 선택하세요.");Messages=schema.Messages.Where(m=>!IcdIncludesHeader||RequireHeaderLayout||new[]{IdField!,LengthField!}.All(field=>schema.Fields.Any(f=>f.Message==m&&SameLayout(f,field)))).Where(m=>schema.RequiredBytes(m)+DecodeOffset>=HeaderBytes).Select(m=>new CaptureMessageRule(m,"",schema.RequiredBytes(m))).ToList();}
         Validate();if(!SeparateHeader&&!IcdIncludesHeader)throw new ArgumentException("ICD가 본문만 포함하면 별도 헤더를 선택하세요.");
         if(HeaderFields.Count==0)throw new ArgumentException("헤더 필드가 없습니다.");

@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace LanScope;
 public sealed record StructSource(string Name,byte[] Content);
-public sealed record StructLayoutInfo(string Name,int Size,int Alignment,IReadOnlyList<IcdField> Fields,string SourceName="");
+public sealed record StructLayoutInfo(string Name,int Size,int Alignment,IReadOnlyList<IcdField> Fields,string SourceName="",IReadOnlyList<string>? ReferencedTypes=null);
 public static class CStructParser
 {
     private sealed record Definition(string Name,string Body,int Pack,string SourceName);
@@ -70,7 +70,7 @@ public static class CStructParser
         {
             name=Resolve(name);if(result.TryGetValue(name,out var cached))return cached;
             if(depth>16||!active.Add(name))throw new ArgumentException("struct 순환/깊이 초과: "+name);if(!definitions.TryGetValue(name,out var definition))throw new ArgumentException("찾을 수 없는 struct/type: "+name+". 공통헤더 형식을 먼저 지정하거나 필요한 타입 정의 파일을 함께 선택하세요.");
-            int cursor=0,maxAlignment=1,unitOffset=-1,unitBytes=0,usedBits=0;string unitType="";var fields=new List<IcdField>();var names=new HashSet<string>();
+            int cursor=0,maxAlignment=1,unitOffset=-1,unitBytes=0,usedBits=0;string unitType="";var fields=new List<IcdField>();var names=new HashSet<string>();var referencedTypes=new HashSet<string>(StringComparer.Ordinal);
             foreach(var raw in definition.Body.Split(';',StringSplitOptions.RemoveEmptyEntries)) {
                 string declaration=Regex.Replace(raw.Trim(),@"\s+"," ");if(declaration.Length==0)continue;
                 var member=Regex.Match(declaration,@"^(?<type>(?:struct )?[A-Za-z_]\w*(?: [A-Za-z_]\w*)*?)\s+(?<name>[A-Za-z_]\w*)?(?:\s*\[\s*(?<count>[A-Za-z_]\w*|0x[0-9a-fA-F]+|\d+)\s*\])?(?:\s*:\s*(?<bits>\d+))?$");
@@ -78,7 +78,7 @@ public static class CStructParser
                 string type=Resolve(Normalize(member.Groups["type"].Value.Replace("struct ",""))),fieldName=member.Groups["name"].Value;bool isBits=member.Groups["bits"].Success;int count=member.Groups["count"].Success?Number(member.Groups["count"].Value):1;
                 if(count<1||count>1024||(isBits&&member.Groups["count"].Success))throw new ArgumentException("고정 배열 길이/비트 필드 배열 오류");
                 if(fieldName.Length>0&&!names.Add(fieldName))throw new ArgumentException("중복 struct 필드: "+fieldName);
-                bool scalar=primitives.TryGetValue(type,out var primitive);var nested=scalar?null:Compile(type,depth+1);int bytes=scalar?primitive!.Bytes:nested!.Size,alignment=Math.Min(scalar?bytes:nested!.Alignment,definition.Pack);maxAlignment=Math.Max(maxAlignment,alignment);
+                bool scalar=primitives.TryGetValue(type,out var primitive);var nested=scalar?null:Compile(type,depth+1);int bytes=scalar?primitive!.Bytes:nested!.Size,alignment=Math.Min(scalar?bytes:nested!.Alignment,definition.Pack);maxAlignment=Math.Max(maxAlignment,alignment);if(nested!=null)referencedTypes.Add(nested.Name);
                 if(isBits) {
                     if(!scalar||primitive!.Type is not ("uint" or "int"))throw new ArgumentException("비트 필드 기본 타입은 고정 길이 정수여야 합니다.");
                     int bits=Number(member.Groups["bits"].Value);if(bits<0||bits>bytes*8)throw new ArgumentException("비트 필드가 저장 단위를 넘습니다.");
@@ -92,7 +92,7 @@ public static class CStructParser
                 }
                 if(cursor>65535||fields.Count>10000)throw new ArgumentException("struct 크기/필드 수 제한 초과");
             }
-            int size=Align(cursor,maxAlignment);if(size==0||size>65535)throw new ArgumentException("struct가 비어 있거나 너무 큽니다: "+name);active.Remove(name);var layout=new StructLayoutInfo(name,size,maxAlignment,fields,definition.SourceName);result.Add(name,layout);return layout;
+            int size=Align(cursor,maxAlignment);if(size==0||size>65535)throw new ArgumentException("struct가 비어 있거나 너무 큽니다: "+name);active.Remove(name);var layout=new StructLayoutInfo(name,size,maxAlignment,fields,definition.SourceName,referencedTypes.ToArray());result.Add(name,layout);return layout;
         }
         foreach(var name in definitions.Keys)Compile(name,0);foreach(var alias in aliases.Keys){var actual=Resolve(alias);if(result.TryGetValue(actual,out var layout))result.TryAdd(alias,layout);}
         if(result.Count==0)throw new ArgumentException("struct 정의가 없습니다.");return result;

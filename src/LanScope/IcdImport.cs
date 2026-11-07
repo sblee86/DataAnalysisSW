@@ -19,11 +19,17 @@ public static class IcdImport
     }
     public static byte[] FromHeaders(IReadOnlyList<StructSource> sources,int pack,string endian,string bitOrder,IReadOnlySet<string>? messageFiles=null,string excludedType="")
     {
+        _ = excludedType; // Legacy argument: choosing a header role never suppresses a selected message type.
         var layouts=CStructParser.Parse(sources,pack,endian,bitOrder);var schema=new IcdSchema();
-        foreach(var layout in layouts.Values.DistinctBy(x=>x.Name).Where(x=>(messageFiles==null||messageFiles.Contains(x.SourceName))&&x.Name!=excludedType)){
+        var selectedFiles=messageFiles?.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var candidates=layouts.Values.DistinctBy(x=>x.Name).Where(x=>selectedFiles==null||selectedFiles.Contains(x.SourceName)).ToList();
+        // Choosing fields from a full message does not turn that entire type into a header-only dependency.
+        // Only nested helper types of the selected messages are dependencies, regardless of the chosen header name.
+        var dependencies=candidates.SelectMany(x=>x.ReferencedTypes??[]).ToHashSet(StringComparer.Ordinal);
+        foreach(var layout in candidates.Where(x=>!dependencies.Contains(x.Name))){
             schema.Fields.AddRange(layout.Fields);schema.MessageSizes[layout.Name]=layout.Size;
         }
-        if(schema.Fields.Count==0)throw new ArgumentException("선택 파일에 가져올 메시지 구조체가 없습니다. 공통헤더는 타입 정의로만 사용됩니다.");var bytes=IcdExport.CsvSchema(schema);IcdCsv.Parse(bytes);return bytes;
+        if(schema.Fields.Count==0)throw new ArgumentException("선택 파일에 가져올 메시지 구조체가 없습니다. 선택 파일의 최상위 메시지 구조체를 확인하세요.");var bytes=IcdExport.CsvSchema(schema);IcdCsv.Parse(bytes);return bytes;
     }
     public static List<StructSource> CombineHeaders(IReadOnlyList<StructSource> current,IReadOnlyList<StructSource> incoming)
     {

@@ -132,3 +132,9 @@
 ## Administrator file-management guide
 
 - maintainer-notes/DRAS-file-management-admin.txt is a UTF-8 BOM administrator reference, included in repository/source ZIP only. Never copy maintainer-notes into the Windows publish directory, runtime ZIP or application UI/readme. Keep its paths/crypto descriptions consistent with implementation and never include real credentials, keys or ICDs.
+
+## Same-file header-prefix import regression
+
+- Selecting TargetTrack (or any full message type) as a source of header fields with HeaderBytes=4 must not exclude that type from message import. The legacy excludedType argument is only retained for caller compatibility; never filter message candidates by HeaderName.
+- Parser layouts retain ReferencedTypes. Among selected file declarations, import root types as messages and expand referenced helper types as nested data. Every independent root still passes header validation; do not silently filter invalid roots. Match source filenames case-insensitively for Windows.
+- New header policies store only selected ID/Length descriptors in HeaderFields; raw source/type definitions remain encrypted for reuse. Old full-message header descriptors normalize during Prepare, without removing any body fields from the ICD.
