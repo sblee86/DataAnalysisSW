@@ -31,7 +31,7 @@ public sealed class PacketHeaderMatcher
         profile.ValidateEndpoints();senders=profile.SenderIps.Select(IPAddress.Parse).ToHashSet();receivers=profile.ReceiverIps.Select(IPAddress.Parse).ToHashSet();enabled=profile.Enabled;bothDirections=profile.BothDirections;
         this.messageSizes=this.messages.Values.Distinct().ToDictionary(m=>m,schema.RequiredBytes);this.idField=idField;this.lengthField=lengthField;this.declaredLengthAdjustment=declaredLengthAdjustment;this.decodeOffset=decodeOffset;
     }
-    private static void ValidateHeaderField(IcdField f)
+    internal static void ValidateHeaderField(IcdField f)
     {
         if(f.Type is not ("uint" or "int")||f.Scale!=1||f.Bias!=0||f.ByteOffset is <0 or >65534||f.BitOffset is <0 or >7||f.BitLength is <1 or >64||f.EndByte>65535||f.Endian is not ("be" or "le")||f.BitOrder is not ("msb0" or "lsb0"))throw new ArgumentException("공통헤더 ID/길이는 위치·순서가 명시된 raw integer 필드여야 합니다.");
         if(f.StorageBits!=0&&(f.StorageBits is not (8 or 16 or 32 or 64)||f.StorageBitOffset<0||f.StorageBitOffset>f.StorageBits-f.BitLength||f.BitOffset!=f.StorageBitOffset%8))throw new ArgumentException("공통헤더 저장 단위 오류");

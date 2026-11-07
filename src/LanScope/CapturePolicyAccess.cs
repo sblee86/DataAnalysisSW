@@ -5,6 +5,8 @@ using System.Security.Cryptography;
 namespace LanScope;
 internal static class CapturePolicyAccess
 {
+    internal static void SealShared(LoginSession admin,WorkspaceSettings settings){admin.RequireAdmin();if(settings.SharedHeader==null){settings.EncryptedSharedHeader=[];return;}settings.SharedHeader.ValidateHeaderDefinition();var bytes=JsonSerializer.SerializeToUtf8Bytes(settings.SharedHeader);try{settings.EncryptedSharedHeader=IcdProtection.Encrypt(admin,"DRAS shared header v1",bytes);}finally{CryptographicOperations.ZeroMemory(bytes);}}
+    internal static void OpenShared(LoginSession admin,WorkspaceSettings settings){admin.RequireAdmin();if(settings.EncryptedSharedHeader.Length==0){settings.SharedHeader=null;return;}var bytes=IcdProtection.Decrypt(admin,"DRAS shared header v1",settings.EncryptedSharedHeader);try{settings.SharedHeader=JsonSerializer.Deserialize<CapturePolicy>(bytes)??throw new InvalidDataException("공통헤더 저장 형식 오류");settings.SharedHeader.ValidateHeaderDefinition();}finally{CryptographicOperations.ZeroMemory(bytes);}}
     private static string Purpose(RecordProfile p)=>"capture-policy:"+p.Id+":"+p.IcdId;
     internal static void Seal(LoginSession admin,RecordProfile p,byte[] publicKey)
     {

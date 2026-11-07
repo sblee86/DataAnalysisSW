@@ -17,13 +17,13 @@ public static class IcdImport
         foreach(var message in combined.Messages)combined.MessageSizes[message]=Math.Max(current.RequiredBytes(message),incoming.RequiredBytes(message));
         var bytes=IcdExport.CsvSchema(combined);IcdCsv.Parse(bytes);return bytes;
     }
-    public static byte[] FromHeaders(IReadOnlyList<StructSource> sources,int pack,string endian,string bitOrder)
+    public static byte[] FromHeaders(IReadOnlyList<StructSource> sources,int pack,string endian,string bitOrder,IReadOnlySet<string>? messageFiles=null,string excludedType="")
     {
         var layouts=CStructParser.Parse(sources,pack,endian,bitOrder);var schema=new IcdSchema();
-        foreach(var layout in layouts.Values.DistinctBy(x=>x.Name)){
+        foreach(var layout in layouts.Values.DistinctBy(x=>x.Name).Where(x=>(messageFiles==null||messageFiles.Contains(x.SourceName))&&x.Name!=excludedType)){
             schema.Fields.AddRange(layout.Fields);schema.MessageSizes[layout.Name]=layout.Size;
         }
-        var bytes=IcdExport.CsvSchema(schema);IcdCsv.Parse(bytes);return bytes;
+        if(schema.Fields.Count==0)throw new ArgumentException("선택 파일에 가져올 메시지 구조체가 없습니다. 공통헤더는 타입 정의로만 사용됩니다.");var bytes=IcdExport.CsvSchema(schema);IcdCsv.Parse(bytes);return bytes;
     }
     public static List<StructSource> CombineHeaders(IReadOnlyList<StructSource> current,IReadOnlyList<StructSource> incoming)
     {

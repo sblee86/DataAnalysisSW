@@ -4,10 +4,10 @@ using System.Text.RegularExpressions;
 
 namespace LanScope;
 public sealed record StructSource(string Name,byte[] Content);
-public sealed record StructLayoutInfo(string Name,int Size,int Alignment,IReadOnlyList<IcdField> Fields);
+public sealed record StructLayoutInfo(string Name,int Size,int Alignment,IReadOnlyList<IcdField> Fields,string SourceName="");
 public static class CStructParser
 {
-    private sealed record Definition(string Name,string Body,int Pack);
+    private sealed record Definition(string Name,string Body,int Pack,string SourceName);
     private sealed record Scalar(int Bytes,string Type);
     public static Dictionary<string,StructLayoutInfo> Parse(IReadOnlyList<StructSource> sources,int defaultPack=1,string endian="be",string bitOrder="lsb0")
     {
@@ -19,6 +19,7 @@ public static class CStructParser
         foreach(var (names,bytes,kind) in new[]{("char",1,"int"),("signed short|short int|signed short int",2,"int"),("unsigned short int",2,"uint"),("long|long int|signed long|signed long int",4,"int"),("unsigned|unsigned long|unsigned long int",4,"uint"),("long long|long long int|signed long long|signed long long int|__int64",8,"int"),("unsigned long long|unsigned long long int|unsigned __int64",8,"uint")})
             foreach(var name in names.Split('|'))primitives[name]=new(bytes,kind);
         primitives["signed"]=primitives["signed int"]=new(4,"int");
+        foreach(var (name,bytes,kind) in new[]{("UCHAR",1,"uint"),("CHAR",1,"int"),("USHORT",2,"uint"),("SHORT",2,"int"),("UINT",4,"uint"),("INT",4,"int"),("ULONG",4,"uint"),("LONG",4,"int"),("ULONGLONG",8,"uint"),("LONGLONG",8,"int")})primitives[name]=new(bytes,kind);
         string Normalize(string value)=>Regex.Replace(Regex.Replace(value,@"\b(const|volatile)\b", " ").Trim(),@"\s+"," ");
         // Expand comma-separated members while retaining their shared declaration type.
         string Expand(string body)=>string.Join(";",body.Split(';').SelectMany(raw=>{
@@ -50,12 +51,15 @@ public static class CStructParser
             foreach(Match match in matches) {
                 var tag=match.Groups["tag"].Value;var alias=match.Groups["alias"].Value;string name=alias.Length>0?alias:tag;
                 if(!match.Groups["typedef"].Success&&alias.Length>0)throw new ArgumentException("struct 인스턴스 선언은 지원하지 않습니다.");
-                if(name.Length==0||definitions.ContainsKey(name))throw new ArgumentException("이름 없는/중복 struct: "+name);
-                int ownPack=packEvents.Last(e=>e.Index<=match.Index).Pack;definitions.Add(name,new(name,Expand(match.Groups["body"].Value),ownPack));if(tag.Length>0&&tag!=name)aliases[tag]=name;
+                if(name.Length==0)throw new ArgumentException("이름 없는 struct");
+                int ownPack=packEvents.Last(e=>e.Index<=match.Index).Pack;var body=Expand(match.Groups["body"].Value);
+                string Tokens(string value)=>string.Join("|",Regex.Matches(value,@"[A-Za-z_]\w*|\d+|[^\s]").Select(m=>m.Value));
+                if(definitions.TryGetValue(name,out var previous)){if(previous.SourceName==source.Name||previous.Pack!=ownPack||Tokens(previous.Body)!=Tokens(body))throw new ArgumentException("동일한 타입 이름에 다른 정의가 있습니다: "+name+". 공통헤더 형식 지정·관리에서 정의를 확인하세요.");}
+                else definitions.Add(name,new(name,body,ownPack,source.Name));if(tag.Length>0&&tag!=name)aliases[tag]=name;
                 for(int i=match.Index;i<match.Index+match.Length;i++)residual[i]=' ';
             }
             string rest=new(residual);
-            rest=Regex.Replace(rest,@"using\s+([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*)\s*;",m=>{if(!aliases.TryAdd(m.Groups[1].Value,Normalize(m.Groups[2].Value)))throw new ArgumentException("중복 alias: "+m.Groups[1].Value);return "";});foreach(Match alias in Regex.Matches(rest,@"typedef\s+(?:struct\s+)?([A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*?)\s+([A-Za-z_]\w*)\s*;")){if(alias.Groups[2].Value==alias.Groups[1].Value)continue;if(!aliases.TryAdd(alias.Groups[2].Value,Normalize(alias.Groups[1].Value)))throw new ArgumentException("중복 typedef: "+alias.Groups[2].Value);}
+            rest=Regex.Replace(rest,@"using\s+([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*)\s*;",m=>{if(!aliases.TryAdd(m.Groups[1].Value,Normalize(m.Groups[2].Value))&&aliases[m.Groups[1].Value]!=Normalize(m.Groups[2].Value))throw new ArgumentException("중복 alias: "+m.Groups[1].Value);return "";});foreach(Match alias in Regex.Matches(rest,@"typedef\s+(?:struct\s+)?([A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*?)\s+([A-Za-z_]\w*)\s*;")){if(alias.Groups[2].Value==alias.Groups[1].Value)continue;if(!aliases.TryAdd(alias.Groups[2].Value,Normalize(alias.Groups[1].Value))&&aliases[alias.Groups[2].Value]!=Normalize(alias.Groups[1].Value))throw new ArgumentException("중복 typedef: "+alias.Groups[2].Value);}
             rest=Regex.Replace(rest,@"typedef\s+(?:struct\s+)?[A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*?\s+[A-Za-z_]\w*\s*;","");
             if(!string.IsNullOrWhiteSpace(rest.Replace(";","")))throw new ArgumentException(source.Name+": 미지원 선언이 남았습니다. 포인터/함수/inline struct/동적 배열은 지원하지 않습니다.");
         }
@@ -65,7 +69,7 @@ public static class CStructParser
         StructLayoutInfo Compile(string name,int depth)
         {
             name=Resolve(name);if(result.TryGetValue(name,out var cached))return cached;
-            if(depth>16||!active.Add(name))throw new ArgumentException("struct 순환/깊이 초과: "+name);if(!definitions.TryGetValue(name,out var definition))throw new ArgumentException("찾을 수 없는 struct/type: "+name);
+            if(depth>16||!active.Add(name))throw new ArgumentException("struct 순환/깊이 초과: "+name);if(!definitions.TryGetValue(name,out var definition))throw new ArgumentException("찾을 수 없는 struct/type: "+name+". 공통헤더 형식을 먼저 지정하거나 필요한 타입 정의 파일을 함께 선택하세요.");
             int cursor=0,maxAlignment=1,unitOffset=-1,unitBytes=0,usedBits=0;string unitType="";var fields=new List<IcdField>();var names=new HashSet<string>();
             foreach(var raw in definition.Body.Split(';',StringSplitOptions.RemoveEmptyEntries)) {
                 string declaration=Regex.Replace(raw.Trim(),@"\s+"," ");if(declaration.Length==0)continue;
@@ -88,7 +92,7 @@ public static class CStructParser
                 }
                 if(cursor>65535||fields.Count>10000)throw new ArgumentException("struct 크기/필드 수 제한 초과");
             }
-            int size=Align(cursor,maxAlignment);if(size==0||size>65535)throw new ArgumentException("struct가 비어 있거나 너무 큽니다: "+name);active.Remove(name);var layout=new StructLayoutInfo(name,size,maxAlignment,fields);result.Add(name,layout);return layout;
+            int size=Align(cursor,maxAlignment);if(size==0||size>65535)throw new ArgumentException("struct가 비어 있거나 너무 큽니다: "+name);active.Remove(name);var layout=new StructLayoutInfo(name,size,maxAlignment,fields,definition.SourceName);result.Add(name,layout);return layout;
         }
         foreach(var name in definitions.Keys)Compile(name,0);foreach(var alias in aliases.Keys){var actual=Resolve(alias);if(result.TryGetValue(actual,out var layout))result.TryAdd(alias,layout);}
         if(result.Count==0)throw new ArgumentException("struct 정의가 없습니다.");return result;

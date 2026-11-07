@@ -91,6 +91,8 @@ public sealed class NicBinding
 }
 public sealed class WorkspaceSettings
 {
+    [JsonIgnore] public CapturePolicy? SharedHeader {get;set;}
+    public byte[] EncryptedSharedHeader {get;set;}=[];
     public string GuestUserId {get;set;}="guest";
     public byte[] GuestLoginEnvelope {get;set;}=[];
     public byte[] GuestRecipientPublicKey {get;set;}=[];
@@ -126,7 +128,7 @@ public sealed class WorkspaceSettings
             Profiles=allowed.Select(p=>new RecordProfile{Id=p.Id,Name=p.Name,Enabled=p.Enabled,ByteOrder=p.ByteOrder,StructPack=p.StructPack,StructBitOrder=p.StructBitOrder,IcdId=p.IcdId,CapturePolicy=CapturePolicyAccess.OpenGuest(session,p),EncryptedCapturePolicy=[..p.EncryptedCapturePolicy],GuestCapturePolicy=[..p.GuestCapturePolicy],EncryptedIcd=[..p.EncryptedIcd],GuestConversionIcd=[..p.GuestConversionIcd],SenderIps=[..p.SenderIps],ReceiverIps=[..p.ReceiverIps],BothDirections=p.BothDirections}).ToList(),
             Bindings=Bindings.Select(b=>new NicBinding{DeviceId=b.DeviceId,DeviceName=b.DeviceName,ProfileIds=b.ProfileIds.Where(ids.Contains).ToList()}).Where(b=>b.ProfileIds.Count>0).ToList()};
     }
-    public void ClearPlaintext(){foreach(var p in Profiles)p.ClearPlaintext();}
+    public void ClearPlaintext(){SharedHeader?.Clear();SharedHeader=null;foreach(var p in Profiles)p.ClearPlaintext();}
 
     public void ValidateCaptureConflicts()
     {

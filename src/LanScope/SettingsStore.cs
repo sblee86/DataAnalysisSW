@@ -49,13 +49,14 @@ public sealed class SettingsStore(string? filePath = null, byte[]? policyPublicK
         var plain=Protect(ciphertext,false);
         try {
             var settings=JsonSerializer.Deserialize<WorkspaceSettings>(plain)??throw new InvalidDataException("설정파일이 비어 있습니다.");
+            if(session.Role==UserRole.Admin)CapturePolicyAccess.OpenShared(session,settings);
             if(session.Role==UserRole.Admin)foreach(var p in settings.Profiles){IcdProtection.Open(session,p);CapturePolicyAccess.OpenAdmin(session,p);}
             return settings.ForSession(session);
         }finally{CryptographicOperations.ZeroMemory(plain);}
     }
     public void Save(LoginSession session, WorkspaceSettings settings)
     {
-        session.RequireAdmin();
+        session.RequireAdmin();CapturePolicyAccess.SealShared(session,settings);
         foreach(var profile in settings.Profiles){IcdProtection.Seal(session,profile);CapturePolicyAccess.Seal(session,profile,(settings.GuestRecipientPublicKey.Length>0?settings.GuestRecipientPublicKey:guestPublicKey??GuestIcdAccess.EmbeddedPublicKey()));if(settings.GuestIcdAllowList.Contains(profile.IcdId))GuestIcdAccess.Seal(session,profile,(settings.GuestRecipientPublicKey.Length>0?settings.GuestRecipientPublicKey:guestPublicKey??GuestIcdAccess.EmbeddedPublicKey()));else profile.GuestConversionIcd=[];}
         settings.ValidateCaptureConflicts();
         settings.GuestIcdAllowList.RemoveAll(id=>!settings.Profiles.Any(p=>p.IcdId==id));

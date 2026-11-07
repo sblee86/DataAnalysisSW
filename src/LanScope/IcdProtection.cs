@@ -48,7 +48,7 @@ public static class IcdProtection
     public static WorkspaceSettings CloneForAdmin(LoginSession admin,WorkspaceSettings settings)
     {
         admin.RequireAdmin();
-        var clone=JsonSerializer.Deserialize<WorkspaceSettings>(JsonSerializer.Serialize(settings))!;
+        var clone=JsonSerializer.Deserialize<WorkspaceSettings>(JsonSerializer.Serialize(settings))!;clone.SharedHeader=settings.SharedHeader?.Clone();if(clone.SharedHeader==null&&clone.EncryptedSharedHeader.Length>0)CapturePolicyAccess.OpenShared(admin,clone);
         foreach(var profile in clone.Profiles){Open(admin,profile);CapturePolicyAccess.OpenAdmin(admin,profile);}
         return clone;
     }
