@@ -134,3 +134,9 @@ dotnet run --project tests/LanScope.StartupChecks
 - `%LOCALAPPDATA%\DRAS\ui-preferences.bin`: 글자·창 크기·배치 설정만 담는 숨김 바이너리이며 암호화 파일은 아닙니다.
 
 `%LOCALAPPDATA%`는 보통 `C:\Users\사용자명\AppData\Local`입니다. 가져오기에 선택한 원본 .h/.hpp/.csv 파일은 원래 위치에 그대로 두고 내부 사본을 암호화합니다. PCAP과 사용자가 명시적으로 내보낸 CSV/C++는 표준 평문 파일입니다. DPAPI 보호 데이터는 같은 Windows 사용자 환경에 묶입니다.
+
+### CSV 변환 자동 저장과 상세 오류 로그
+
+PCAP → CSV 변환에서 **자동 파일명**을 체크하면 `인터페이스명_yyyyMMdd_HHmmss.csv`로 바로 저장합니다. 해제하면 기존 수동 저장 창을 사용합니다. CSV 저장 폴더를 선택·변경·기억할 수 있고 **날짜·시분초 하위 폴더 생성**도 지원합니다. PCAP 기록 경로와는 별도입니다.
+
+CSV 옆에 `.conversion.log.txt`를 함께 저장하며 패킷 제외 사유, 실제·기대 길이, 필드 해석·범위 오류와 처리 집계를 자세히 남깁니다. 취소·실패 로그도 유지하고 미완성 CSV는 정리합니다. 기존 로그와 자동 저장 파일은 덮어쓰지 않습니다. [저장 방식·로그 코드 설명](docs/CSV-CONVERSION.md)을 참고하세요.

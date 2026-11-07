@@ -138,3 +138,10 @@
 - Selecting TargetTrack (or any full message type) as a source of header fields with HeaderBytes=4 must not exclude that type from message import. The legacy excludedType argument is only retained for caller compatibility; never filter message candidates by HeaderName.
 - Parser layouts retain ReferencedTypes. Among selected file declarations, import root types as messages and expand referenced helper types as nested data. Every independent root still passes header validation; do not silently filter invalid roots. Match source filenames case-insensitively for Windows.
 - New header policies store only selected ID/Length descriptors in HeaderFields; raw source/type definitions remain encrypted for reuse. Old full-message header descriptors normalize during Prepare, without removing any body fields from the ICD.
+
+## CSV output modes and detailed diagnostic logs
+
+- ConversionSaveOptions/ConversionPreferences persist nonsecret per-Windows-user output folder, auto interface_timestamp naming and timestamp subfolder options independently from signed NIC/PCAP config. Both roles may set personal conversion destination; conversion grants still enforced in service before any log/output creation.
+- Manual keeps SaveFileDialog; automatic uses sanitized interface_yyyyMMdd_HHmmss.csv and non-overwrite commit with collision suffixes. Timestamp folders apply to both modes and never become next default base folder.
+- PcapCsvConverter writes unique adjacent UTF-8 .conversion.log.txt per attempt: per-skipped-frame reasons/actual expected lengths/endpoints, per-field decode/range data, summary and failure/cancel status. Keep original PCAP and previous completed CSV/logs. Partial CSV temps are removed. Do not expose raw ICD source/key/other restricted interface names. Clear recent-log links/results on logout.
+- Web mirrors options in local storage and produces a synthetic CSV+log ZIP with folder structure, not real PCAP conversion or browser filesystem writes. Keep helpers/assets synced via package script. Administrator file-management TXT remains source-only.

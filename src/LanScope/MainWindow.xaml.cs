@@ -41,6 +41,7 @@ public partial class MainWindow : Window
         MessageBoxSelect.SelectionChanged+=WriteMessageSelected;
         NicGrid.SelectionChanged+=NicSelected;
         ApplyUiLayout(uiPreferences.LoadLayout(),false);UpdateNavColors("dashboard");SampleBox.ItemsSource=sampleNames;SampleBox.SelectedIndex=0;
+        LoadConversionOptions();AutoCsvNameBox.Checked+=ConversionOptionsChanged;AutoCsvNameBox.Unchecked+=ConversionOptionsChanged;CsvTimestampFolderBox.Checked+=ConversionOptionsChanged;CsvTimestampFolderBox.Unchecked+=ConversionOptionsChanged;
         timer.Tick+=(_,_)=>Tick();DashboardView.SizeChanged+=(_,_)=>FitTestName();UserIdBox.Focus();
     }
     private readonly UiPreferences uiPreferences=new();
@@ -332,6 +333,13 @@ public partial class MainWindow : Window
         if(!AdminAction())return;string folder=FolderBox.Text.Trim();
         SaveChange(next=>{if(!Path.IsPathFullyQualified(folder))throw new ArgumentException("기록 폴더는 절대 경로를 입력하세요.");Directory.CreateDirectory(folder);next.OutputDirectory=folder;});
     }
+    private readonly ConversionPreferences conversionPreferences=new();private string lastConversionLog="";
+    private void LoadConversionOptions(){var value=conversionPreferences.Load();AutoCsvNameBox.IsChecked=value.Automatic;CsvTimestampFolderBox.IsChecked=value.TimestampFolder;ConversionFolderBox.Text=value.Folder;}
+    private ConversionSaveOptions CsvOptions()=>new(AutoCsvNameBox.IsChecked==true,CsvTimestampFolderBox.IsChecked==true,ConversionFolderBox.Text.Trim());
+    private void ConversionOptionsChanged(object sender,RoutedEventArgs e){if(busy)return;try{conversionPreferences.Save(CsvOptions());}catch(Exception error){ShowError(error);}}
+    private void ChooseConversionFolderClick(object sender,RoutedEventArgs e){if(session==null||busy||engine.IsRunning)return;var d=new OpenFolderDialog{Title="CSV 변환 결과 저장 폴더",InitialDirectory=Directory.Exists(ConversionFolderBox.Text)?ConversionFolderBox.Text:""};if(d.ShowDialog(this)!=true)return;ConversionFolderBox.Text=d.FolderName;SaveConversionFolderClick(sender,e);}
+    private void SaveConversionFolderClick(object sender,RoutedEventArgs e){if(session==null||busy||engine.IsRunning)return;try{var options=CsvOptions();options.Validate();Directory.CreateDirectory(options.Folder);conversionPreferences.Save(options);StatusText.Text="CSV 변환 저장 경로 설정 완료 · PCAP 기록 경로와 별도";}catch(Exception error){ShowError(error);}}
+    private void OpenConversionLogClick(object sender,RoutedEventArgs e){if(session==null||busy)return;try{if(!File.Exists(lastConversionLog))throw new ArgumentException("저장된 변환 로그가 없습니다.");System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(lastConversionLog){UseShellExecute=true});}catch(Exception error){ShowError(error);}}
     private CancellationTokenSource? conversionCancellation;
     private void ConversionClick(object sender,RoutedEventArgs e)
     {
@@ -344,21 +352,25 @@ public partial class MainWindow : Window
     }
     private void ConversionProfileSelected(object sender,SelectionChangedEventArgs e)
     {
-        ConversionMessageBox.ItemsSource=null;ConvertButton.IsEnabled=false;
+        var previousMessage=ConversionMessageBox.SelectedItem as string;ConversionMessageBox.ItemsSource=null;ConvertButton.IsEnabled=false;
         if(session==null||ConversionProfileBox.SelectedItem is not RecordProfile p)return;
-        try{var fresh=File.Exists(store.FilePath)?store.Load(session):settings;try{ConversionMessageBox.ItemsSource=PcapCsvConverter.Messages(session,fresh,p.Id);ConversionMessageBox.SelectedIndex=0;ConversionAccessText.Text="CSV 값 변환 허용 · ICD 원본/구조 편집은 관리자 전용";ConvertButton.IsEnabled=!busy;}finally{if(!ReferenceEquals(fresh,settings))fresh.ClearPlaintext();}}
+        try{var fresh=File.Exists(store.FilePath)?store.Load(session):settings;try{ConversionMessageBox.ItemsSource=PcapCsvConverter.Messages(session,fresh,p.Id);ConversionMessageBox.SelectedItem=previousMessage;if(ConversionMessageBox.SelectedItem==null)ConversionMessageBox.SelectedIndex=0;ConversionAccessText.Text="CSV 값 변환 허용 · ICD 원본/구조 편집은 관리자 전용";ConvertButton.IsEnabled=!busy;}finally{if(!ReferenceEquals(fresh,settings))fresh.ClearPlaintext();}}
         catch(Exception error){ConversionAccessText.Text=error.Message;}
     }
     private async void ConvertClick(object sender,RoutedEventArgs e)
     {
         if(session==null||busy||engine.IsRunning||ConversionProfileBox.SelectedItem is not RecordProfile p||ConversionMessageBox.SelectedItem is not string message)return;
         if(!File.Exists(ConvertInputBox.Text)){ShowError(new ArgumentException("PCAP 파일을 선택하세요."));return;}
-        var dialog=new SaveFileDialog{Title="변환 CSV 저장",Filter="CSV (*.csv)|*.csv",FileName=Path.GetFileNameWithoutExtension(ConvertInputBox.Text)+"_values.csv"};if(dialog.ShowDialog()!=true)return;
-        var input=ConvertInputBox.Text;busy=true;ConvertButton.IsEnabled=false;CancelConvertButton.IsEnabled=true;ConversionProfileBox.IsEnabled=false;conversionCancellation=new();UpdateControls();
-        try{var fresh=File.Exists(store.FilePath)?store.Load(session):settings;try{var result=await Task.Run(()=>PcapCsvConverter.Convert(session,fresh,p.Id,message,input,dialog.FileName,conversionCancellation.Token));ConversionResultText.Text=$"변환 완료: {result.Rows:N0}행 · 전체 {result.Frames:N0}프레임 · 제외 {result.Skipped:N0}개 · 해석 오류 행 {result.RowsWithErrors:N0}개 · 범위 이탈 행 {result.RowsOutsideRange:N0}개\n{dialog.FileName}";}finally{if(!ReferenceEquals(fresh,settings))fresh.ClearPlaintext();}}
-        catch(OperationCanceledException){ConversionResultText.Text="변환을 취소했습니다. 미완료 CSV는 남기지 않습니다.";}
-        catch(Exception error){ShowError(error);}
-        finally{conversionCancellation.Dispose();conversionCancellation=null;busy=false;CancelConvertButton.IsEnabled=false;ConversionProfileBox.IsEnabled=true;UpdateControls();ConversionProfileSelected(this,new SelectionChangedEventArgs(System.Windows.Controls.Primitives.Selector.SelectionChangedEvent,Array.Empty<object>(),Array.Empty<object>()));}
+        ConversionSaveOptions options;string? manualPath=null;
+        try{options=CsvOptions();options.Validate();if(!options.Automatic){var dialog=new SaveFileDialog{Title="변환 CSV 저장",Filter="CSV (*.csv)|*.csv",DefaultExt=".csv",AddExtension=true,OverwritePrompt=!options.TimestampFolder,InitialDirectory=Directory.Exists(options.Folder)?options.Folder:Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),FileName=Path.GetFileNameWithoutExtension(ConvertInputBox.Text)+"_values.csv"};if(dialog.ShowDialog(this)!=true)return;manualPath=dialog.FileName;options=options with{OutputDirectory=Path.GetDirectoryName(manualPath)!};ConversionFolderBox.Text=options.Folder;}conversionPreferences.Save(options);}catch(Exception error){ShowError(error);return;}
+        var input=ConvertInputBox.Text;lastConversionLog="";WorkspaceSettings? fresh=null;
+        try{fresh=File.Exists(store.FilePath)?store.Load(session):settings;if(!PcapCsvConverter.Messages(session,fresh,p.Id).Contains(message))throw new ArgumentException("허용된 변환 메시지를 선택하세요.");var activeProfile=fresh.Profiles.Single(x=>x.Id==p.Id);var output=ConversionOutput.Plan(options,activeProfile.Name,DateTime.Now,manualPath);
+            busy=true;ConvertButton.IsEnabled=false;CancelConvertButton.IsEnabled=true;ConversionProfileBox.IsEnabled=false;ConversionMessageBox.IsEnabled=false;conversionCancellation=new();UpdateControls();ConversionResultText.Text="CSV 변환 중 · 오류와 제외 사유를 로그에 기록합니다.";
+            var result=await Task.Run(()=>PcapCsvConverter.Convert(session,fresh,p.Id,message,input,output,conversionCancellation.Token,overwrite:!options.Automatic&&!options.TimestampFolder));lastConversionLog=result.LogFile;
+            ConversionResultText.Text=$"변환 완료: {result.Rows:N0}행 · 전체 {result.Frames:N0}프레임 · 제외 {result.Skipped:N0}개 · 해석 오류 행 {result.RowsWithErrors:N0}개 · 범위 이탈 행 {result.RowsOutsideRange:N0}개\nCSV: {output}\n변환 로그: {result.LogFile}"+(result.LogWarning.Length>0?"\n"+result.LogWarning:"");
+        }catch(OperationCanceledException error){lastConversionLog=error.Data["ConversionLogPath"] as string??"";ConversionResultText.Text="변환을 취소했습니다. 미완성 CSV는 정리하고 진단 로그를 유지합니다.\n"+lastConversionLog;}
+        catch(Exception error){lastConversionLog=error.Data["ConversionLogPath"] as string??"";ConversionResultText.Text="변환 실패: "+error.Message+(lastConversionLog.Length>0?"\n변환 로그: "+lastConversionLog:"");ShowError(error);}
+        finally{if(fresh!=null&&!ReferenceEquals(fresh,settings))fresh.ClearPlaintext();conversionCancellation?.Dispose();conversionCancellation=null;busy=false;CancelConvertButton.IsEnabled=false;ConversionProfileBox.IsEnabled=true;ConversionMessageBox.IsEnabled=true;UpdateControls();ConversionProfileSelected(this,new SelectionChangedEventArgs(System.Windows.Controls.Primitives.Selector.SelectionChangedEvent,Array.Empty<object>(),Array.Empty<object>()));}
     }
     private void CancelConvertClick(object sender,RoutedEventArgs e)=>conversionCancellation?.Cancel();
     private async void ProtectLegacyClick(object sender,RoutedEventArgs e)
@@ -386,7 +398,7 @@ public partial class MainWindow : Window
     private async void StopClick(object sender,RoutedEventArgs e){if(session!=null&&engine.IsRunning)await StopRecording();}
     private void UpdateControls()
     {
-        bool active=engine.IsRunning;
+        bool active=engine.IsRunning;ConversionOutputOptions.IsEnabled=!active&&!busy;ChooseConversionPcapButton.IsEnabled=!active&&!busy;OpenConversionLogButton.IsEnabled=!busy&&File.Exists(lastConversionLog);
         StartButton.IsEnabled=session!=null&&!active&&!busy&&settings.Bindings.Count>0;
         StopButton.IsEnabled=active&&!busy;TestNameBox.IsEnabled=!active&&!busy;RecordFolderButton.IsEnabled=session?.Role==UserRole.Admin&&!active&&!busy;
         ProfileNav.IsEnabled=SettingsNav.IsEnabled=ConvertNav.IsEnabled=!active&&!busy;
@@ -415,7 +427,7 @@ public partial class MainWindow : Window
     {
         if(busy)return;
         if(engine.IsRunning){if(MessageBox.Show(this,"기록을 중지하고 로그아웃할까요?","로그아웃",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;await StopRecording();}
-        displaySettings?.Close();timer.Stop();settings.ClearPlaintext();NewEditor();ConversionProfileBox.ItemsSource=null;ConversionMessageBox.ItemsSource=null;ConversionAccessText.Text="";ConversionResultText.Text="";ProfilesList.ItemsSource=null;BindingProfiles.ItemsSource=null;session?.Dispose();session=null;WorkspaceView.Visibility=Visibility.Collapsed;LoginView.Visibility=Visibility.Visible;UserIdBox.Clear();PasswordInput.Clear();LoginError.Text="";UserIdBox.Focus();
+        displaySettings?.Close();timer.Stop();lastConversionLog="";OpenConversionLogButton.IsEnabled=false;settings.ClearPlaintext();NewEditor();ConversionProfileBox.ItemsSource=null;ConversionMessageBox.ItemsSource=null;ConversionAccessText.Text="";ConversionResultText.Text="";ProfilesList.ItemsSource=null;BindingProfiles.ItemsSource=null;session?.Dispose();session=null;WorkspaceView.Visibility=Visibility.Collapsed;LoginView.Visibility=Visibility.Visible;UserIdBox.Clear();PasswordInput.Clear();LoginError.Text="";UserIdBox.Focus();
     }
     private void WindowClosing(object? sender,CancelEventArgs e)
     {
