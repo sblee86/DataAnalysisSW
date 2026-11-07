@@ -128,3 +128,7 @@
 - New RequireHeaderLayout checks every imported message for raw integer fields at the USER-selected ID/Length numeric bit positions and widths, plus total message size >= HeaderBytes. Never require names MessageHeader/Header/id/length, never infer fixed offsets, and never check expected ID values. Different field/type names with identical physical layout are valid. New dialog always requires whole header included; legacy body-only policies remain readable.
 - Resolve named C++ references using registered header sources + incoming files. Import only structs declared in selected message files; do not add library/header-only types as messages. Track StructLayoutInfo.SourceName for this. Common Windows scalar aliases include UCHAR/USHORT/etc. Identical cross-file declarations reuse; conflicting definitions fail explicitly.
 - Replace confusing dependency attach/detach actions with explicit message add/replace. Import errors are atomic; new common-header definition may be stored independently of an invalid current editor and reports validation status. Display purpose and workflow in WPF/web.
+
+## Administrator file-management guide
+
+- maintainer-notes/DRAS-file-management-admin.txt is a UTF-8 BOM administrator reference, included in repository/source ZIP only. Never copy maintainer-notes into the Windows publish directory, runtime ZIP or application UI/readme. Keep its paths/crypto descriptions consistent with implementation and never include real credentials, keys or ICDs.
